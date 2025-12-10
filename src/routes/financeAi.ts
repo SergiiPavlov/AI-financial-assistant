@@ -89,6 +89,7 @@ const parseTransactionsWithLLM = async (userId: string, text: string): Promise<P
 };
 
 financeAiRouter.post("/parse-text", async (req, res, next) => {
+  const start = Date.now();
   try {
     const { userId, text } = req.body || {};
     if (typeof userId !== "string" || !userId.trim()) {
@@ -99,8 +100,14 @@ financeAiRouter.post("/parse-text", async (req, res, next) => {
     }
 
     const result = await parseTransactionsWithLLM(userId, text);
+    console.log(
+      `[finance][parse-text] user=${userId} textLength=${text.length} durationMs=${Date.now() - start} status=success transactions=${result.transactions.length}`
+    );
     res.json(result);
   } catch (error) {
+    console.log(
+      `[finance][parse-text] user=${req.body?.userId} textLength=${req.body?.text?.length || 0} durationMs=${Date.now() - start} status=error message=${(error as Error).message}`
+    );
     if (error instanceof MissingApiKeyError) {
       return res.status(503).json({ error: error.message });
     }
@@ -162,6 +169,7 @@ const parseMultipartForm = async (req: any) => {
 };
 
 financeAiRouter.post("/voice", async (req, res, next) => {
+  const start = Date.now();
   try {
     const { fields, files } = await parseMultipartForm(req);
     const userId = fields["userId"] || fields["userid"];
@@ -176,8 +184,14 @@ financeAiRouter.post("/voice", async (req, res, next) => {
 
     const transcription = await transcribeAudio(file.data, file.fileName, file.mimeType);
     const parsed = await parseTransactionsWithLLM(userId, transcription.text);
+    console.log(
+      `[finance][voice] user=${userId} textLength=${transcription.text.length} durationMs=${Date.now() - start} status=success transactions=${parsed.transactions.length}`
+    );
     res.json(parsed);
   } catch (error) {
+    console.log(
+      `[finance][voice] user=${(req as any)?.body?.userId || "unknown"} durationMs=${Date.now() - start} status=error message=${(error as Error).message}`
+    );
     if (error instanceof MissingApiKeyError) {
       return res.status(503).json({ error: error.message });
     }
@@ -201,7 +215,27 @@ const interpretAssistantQuestion = async (message: string): Promise<AssistantInt
     .split("T")[0];
   const defaultTo = today.toISOString().split("T")[0];
 
-  const systemPrompt = `Ты — финансовый помощник. Верни только JSON по схеме {"intent":"total|category|biggestCategory","category":"food|transport|bills|rent|health|fun|shopping|other|null","period":{"from":"YYYY-MM-DD","to":"YYYY-MM-DD"}}. Если категория не указана — ставь null. Если период не указан — возьми с ${defaultFrom} по ${defaultTo}.`;
+  const systemPrompt = `Ты — финансовый помощник. Верни строго JSON без пояснений по схеме {"intent":"total|category|biggestCategory","category":"food|transport|bills|rent|health|fun|shopping|other|null","period":{"from":"YYYY-MM-DD","to":"YYYY-MM-DD"}}.
+Интенты:
+- "total" — запрос про все расходы без фокуса на категории.
+- "category" — запрос про конкретную категорию.
+- "biggestCategory" — запрос про самую затратную категорию.
+
+Категории и триггеры:
+food: ["еда", "продукты", "супермаркет", "магазин", "food", "restaurant", "кафе", "ресторан"]
+transport: ["такси", "транспорт", "метро", "автобус", "поезд", "самолет", "uber", "bolt"]
+bills: ["коммуналка", "счета", "услуги", "интернет", "свет", "вода", "газ"]
+rent: ["аренда", "квартира", "дом", "rent"]
+health: ["здоровье", "лекарства", "аптека", "медицина", "doctor"]
+fun: ["развлечения", "кино", "театр", "игры", "бар", "вечеринка"]
+shopping: ["покупки", "одежда", "shopping", "магазин одежды", "техника"]
+other: любые прочие расходы.
+
+Правила:
+- Если в вопросе явно названа категория или слово-триггер, обязательно возвращай intent: "category" и нормализованную category.
+- intent: "total" допустим только если пользователь спрашивает про все расходы целиком ("сколько всего потратил", "общая сумма" и т.п.).
+- Если категория не указана — ставь null. Если период не указан — возьми с ${defaultFrom} по ${defaultTo}.
+- Возвращай только JSON без текста вокруг.`;
   const response = await callChatModel({ systemPrompt, userPrompt: message });
   const parsed = safeJsonParse(response);
   if (!parsed || typeof parsed !== "object") {
@@ -209,9 +243,18 @@ const interpretAssistantQuestion = async (message: string): Promise<AssistantInt
   }
   const intent: AssistantInterpretation["intent"] =
     parsed.intent === "category" || parsed.intent === "biggestCategory" ? parsed.intent : "total";
-  const category = typeof parsed.category === "string" ? parsed.category : null;
+  const category = typeof parsed.category === "string" && allowedCategories.includes(parsed.category)
+    ? parsed.category
+    : null;
   const periodFrom = typeof parsed?.period?.from === "string" ? parsed.period.from : defaultFrom;
   const periodTo = typeof parsed?.period?.to === "string" ? parsed.period.to : defaultTo;
+  if (category && intent === "total") {
+    return {
+      intent: "category",
+      category,
+      period: { from: periodFrom, to: periodTo }
+    };
+  }
   return {
     intent,
     category,
@@ -220,6 +263,7 @@ const interpretAssistantQuestion = async (message: string): Promise<AssistantInt
 };
 
 financeAiRouter.post("/assistant", async (req, res, next) => {
+  const start = Date.now();
   try {
     const { userId, message } = req.body || {};
     if (typeof userId !== "string" || !userId.trim()) {
@@ -230,6 +274,9 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
     }
 
     const interpretation = await interpretAssistantQuestion(message);
+    console.log(
+      `[finance][assistant] user=${userId} textLength=${message.length} durationMs=${Date.now() - start} status=interpreted intent=${interpretation.intent}`
+    );
     const summary = await getSummary({
       userId,
       from: new Date(interpretation.period.from),
@@ -238,8 +285,10 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
     });
 
     let amount = summary.total;
+    let total = summary.total;
     let categoryAmount: number | undefined;
-    if (interpretation.intent === "category" && interpretation.category) {
+
+    if (interpretation.intent === "category") {
       categoryAmount = summary.byCategory.find((c) => c.category === interpretation.category)?.amount || 0;
       amount = categoryAmount;
     }
@@ -254,12 +303,19 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
       amount = biggest.amount;
     }
 
-    const share = summary.total > 0 ? Number((amount / summary.total).toFixed(2)) : 0;
+    const share = total > 0 ? Number((amount / total).toFixed(2)) : 0;
     const categoryLabel = interpretation.category || "все категории";
-    const answer =
-      interpretation.intent === "biggestCategory"
-        ? `Самая затратная категория за период ${categoryLabel} с суммой ${amount} (${share * 100}% от всех расходов).`
-        : `За период с ${summary.period.from} по ${summary.period.to} по категории ${categoryLabel} сумма расходов составила ${amount}.`;
+    let answer: string;
+
+    if (interpretation.intent === "category") {
+      const percent = (share * 100).toFixed(1);
+      answer = `За период с ${summary.period.from} по ${summary.period.to} по категории ${categoryLabel} сумма расходов составила ${amount}. Это ${percent}% от общей суммы ${total}.`;
+    } else if (interpretation.intent === "biggestCategory") {
+      const percent = (share * 100).toFixed(1);
+      answer = `Самая затратная категория за период с ${summary.period.from} по ${summary.period.to} — ${categoryLabel} с суммой ${amount} (${percent}% от всех расходов).`;
+    } else {
+      answer = `За период с ${summary.period.from} по ${summary.period.to} общая сумма расходов составила ${total}.`;
+    }
 
     res.json({
       userId,
@@ -269,11 +325,14 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
         period: summary.period,
         category: interpretation.category,
         amount,
-        total: summary.total,
+        total,
         share
       }
     });
   } catch (error) {
+    console.log(
+      `[finance][assistant] user=${req.body?.userId} textLength=${req.body?.message?.length || 0} durationMs=${Date.now() - start} status=error message=${(error as Error).message}`
+    );
     if (error instanceof MissingApiKeyError) {
       return res.status(503).json({ error: error.message });
     }
