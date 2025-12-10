@@ -20,9 +20,9 @@
       <input id="userId" value="demo_user" />
       <label>Текст</label>
       <textarea id="text" rows="3">Сегодня 300 на продукты и 200 на такси</textarea>
-      <button onclick="parseText()">Отправить /parse-text</button>
+      <button onclick="parseText()" id="parseButton">Отправить /parse-text</button>
       <pre id="parseResult"></pre>
-      <button onclick="saveParsed()">Сохранить транзакции</button>
+      <button onclick="saveParsed()" id="saveButton">Сохранить транзакции</button>
     </section>
 
     <section>
@@ -51,18 +51,34 @@
 
     <script>
       let lastParse;
+      window.lastParsedTransactions = null;
+      window.lastParsedSaved = false;
       async function parseText() {
         const body = { userId: document.getElementById('userId').value, text: document.getElementById('text').value };
         const res = await fetch('/api/finance/parse-text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await res.json();
         lastParse = data;
+        window.lastParsedTransactions = data.transactions;
+        window.lastParsedSaved = false;
+        const saveBtn = document.getElementById('saveButton');
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Сохранить транзакции';
+        }
         document.getElementById('parseResult').textContent = JSON.stringify(data, null, 2);
       }
       async function saveParsed() {
-        if (!lastParse || !lastParse.transactions) return alert('Сначала распарсьте текст');
+        if (!window.lastParsedTransactions) return alert('Сначала распарсите текст');
+        if (window.lastParsedSaved) return alert('Эти транзакции уже сохранены');
         const body = { items: lastParse.transactions.map(t => ({ ...t, userId: lastParse.userId })) };
         const res = await fetch('/api/finance/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await res.json();
+        window.lastParsedSaved = true;
+        const saveBtn = document.getElementById('saveButton');
+        if (saveBtn) {
+          saveBtn.textContent = 'Сохранено';
+          saveBtn.disabled = true;
+        }
         document.getElementById('transactions').textContent = JSON.stringify(data, null, 2);
       }
       async function loadTransactions() {
