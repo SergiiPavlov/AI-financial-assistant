@@ -2,6 +2,7 @@ import { Router } from "express";
 import { callChatModel, MissingApiKeyError } from "../lib/llmClient";
 import { transcribeAudio } from "../lib/whisperClient";
 import { createTransactions, getSummary } from "../services/financeService";
+import { getEffectiveUserId } from "../lib/userContext";
 
 export const financeAiRouter = Router();
 
@@ -91,25 +92,26 @@ const parseTransactionsWithLLM = async (userId: string, text: string): Promise<P
 financeAiRouter.post("/parse-text", async (req, res, next) => {
   const start = Date.now();
   try {
-    const { userId, text } = req.body || {};
-    if (typeof userId !== "string" || !userId.trim()) {
-      return res.status(400).json({ error: "userId is required" });
-    }
+    const userId = getEffectiveUserId(req);
+    const { text } = req.body || {};
     if (typeof text !== "string" || !text.trim()) {
       return res.status(400).json({ error: "text is required" });
     }
 
     const result = await parseTransactionsWithLLM(userId, text);
     console.log(
-      `[finance][parse-text] user=${userId} textLength=${text.length} durationMs=${Date.now() - start} status=success transactions=${result.transactions.length}`
+      `[finance][parse-text] authUser=${req.user?.id ?? "none"} effectiveUser=${userId} textLength=${text.length} durationMs=${Date.now() - start} status=success transactions=${result.transactions.length}`
     );
     res.json(result);
   } catch (error) {
     console.log(
-      `[finance][parse-text] user=${req.body?.userId} textLength=${req.body?.text?.length || 0} durationMs=${Date.now() - start} status=error message=${(error as Error).message}`
+      `[finance][parse-text] authUser=${req.user?.id ?? "none"} effectiveUser=${(req.body as any)?.userId ?? "unknown"} textLength=${req.body?.text?.length || 0} durationMs=${Date.now() - start} status=error message=${(error as Error).message}`
     );
     if (error instanceof MissingApiKeyError) {
       return res.status(503).json({ error: error.message });
+    }
+    if (error instanceof Error && error.message.includes("userId is required")) {
+      return res.status(400).json({ error: error.message });
     }
     next(error);
   }
@@ -172,10 +174,9 @@ financeAiRouter.post("/voice", async (req, res, next) => {
   const start = Date.now();
   try {
     const { fields, files } = await parseMultipartForm(req);
-    const userId = fields["userId"] || fields["userid"];
-    if (!userId) {
-      return res.status(400).json({ error: "userId is required" });
-    }
+    const userIdFromForm = fields["userId"] || fields["userid"];
+    (req as any).body = { ...(req as any).body, userId: userIdFromForm };
+    const userId = getEffectiveUserId(req);
 
     const file = files[0];
     if (!file) {
@@ -185,15 +186,18 @@ financeAiRouter.post("/voice", async (req, res, next) => {
     const transcription = await transcribeAudio(file.data, file.fileName, file.mimeType);
     const parsed = await parseTransactionsWithLLM(userId, transcription.text);
     console.log(
-      `[finance][voice] user=${userId} textLength=${transcription.text.length} durationMs=${Date.now() - start} status=success transactions=${parsed.transactions.length}`
+      `[finance][voice] authUser=${req.user?.id ?? "none"} effectiveUser=${userId} textLength=${transcription.text.length} durationMs=${Date.now() - start} status=success transactions=${parsed.transactions.length}`
     );
     res.json(parsed);
   } catch (error) {
     console.log(
-      `[finance][voice] user=${(req as any)?.body?.userId || "unknown"} durationMs=${Date.now() - start} status=error message=${(error as Error).message}`
+      `[finance][voice] authUser=${req.user?.id ?? "none"} effectiveUser=${(req as any)?.body?.userId || "unknown"} durationMs=${Date.now() - start} status=error message=${(error as Error).message}`
     );
     if (error instanceof MissingApiKeyError) {
       return res.status(503).json({ error: error.message });
+    }
+    if (error instanceof Error && error.message.includes("userId is required")) {
+      return res.status(400).json({ error: error.message });
     }
     if (error instanceof Error && error.message.includes("Whisper")) {
       return res.status(502).json({ error: error.message });
@@ -265,17 +269,15 @@ other: любые прочие расходы.
 financeAiRouter.post("/assistant", async (req, res, next) => {
   const start = Date.now();
   try {
-    const { userId, message } = req.body || {};
-    if (typeof userId !== "string" || !userId.trim()) {
-      return res.status(400).json({ error: "userId is required" });
-    }
+    const userId = getEffectiveUserId(req);
+    const { message } = req.body || {};
     if (typeof message !== "string" || !message.trim()) {
       return res.status(400).json({ error: "message is required" });
     }
 
     const interpretation = await interpretAssistantQuestion(message);
     console.log(
-      `[finance][assistant] user=${userId} textLength=${message.length} durationMs=${Date.now() - start} status=interpreted intent=${interpretation.intent}`
+      `[finance][assistant] authUser=${req.user?.id ?? "none"} effectiveUser=${userId} textLength=${message.length} durationMs=${Date.now() - start} status=interpreted intent=${interpretation.intent}`
     );
     const summary = await getSummary({
       userId,
@@ -331,10 +333,13 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
     });
   } catch (error) {
     console.log(
-      `[finance][assistant] user=${req.body?.userId} textLength=${req.body?.message?.length || 0} durationMs=${Date.now() - start} status=error message=${(error as Error).message}`
+      `[finance][assistant] authUser=${req.user?.id ?? "none"} effectiveUser=${(req.body as any)?.userId ?? "unknown"} textLength=${req.body?.message?.length || 0} durationMs=${Date.now() - start} status=error message=${(error as Error).message}`
     );
     if (error instanceof MissingApiKeyError) {
       return res.status(503).json({ error: error.message });
+    }
+    if (error instanceof Error && error.message.includes("userId is required")) {
+      return res.status(400).json({ error: error.message });
     }
     next(error);
   }
@@ -342,9 +347,10 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
 
 financeAiRouter.post("/parse-and-save", async (req, res, next) => {
   try {
-    const { userId, text } = req.body || {};
-    if (!userId || !text) {
-      return res.status(400).json({ error: "userId and text are required" });
+    const userId = getEffectiveUserId(req);
+    const { text } = req.body || {};
+    if (!text) {
+      return res.status(400).json({ error: "text is required" });
     }
     const parsed = await parseTransactionsWithLLM(userId, text);
     const created = await createTransactions(
@@ -362,6 +368,9 @@ financeAiRouter.post("/parse-and-save", async (req, res, next) => {
   } catch (error) {
     if (error instanceof MissingApiKeyError) {
       return res.status(503).json({ error: error.message });
+    }
+    if (error instanceof Error && error.message.includes("userId is required")) {
+      return res.status(400).json({ error: error.message });
     }
     next(error);
   }
