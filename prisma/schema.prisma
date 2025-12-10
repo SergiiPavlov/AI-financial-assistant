@@ -1,0 +1,30 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                   String               @id @default(cuid())
+  email                String               @unique
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  financeTransactions  FinanceTransaction[]
+}
+
+model FinanceTransaction {
+  id          String   @id @default(cuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  date        DateTime
+  amount      Decimal  @db.Decimal(14, 2)
+  currency    String   @default("UAH")
+  category    String
+  description String
+  source      String   @default("manual")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
