@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>AI Financial Assistant Demo</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 20px; }
+      section { margin-bottom: 24px; padding: 12px; border: 1px solid #ccc; border-radius: 8px; }
+      label { display: block; margin: 6px 0 2px; }
+      textarea, input, select { width: 100%; padding: 6px; }
+      button { margin-top: 8px; padding: 8px 12px; }
+      pre { background: #f5f5f5; padding: 8px; overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>AI Financial Assistant</h1>
+    <section>
+      <h2>Демо-логин</h2>
+      <p>Получите тестовый JWT и используйте его для всех запросов ниже.</p>
+      <button onclick="demoLogin()">Получить demo-токен</button>
+      <div id="authStatus">Токен не получен</div>
+    </section>
+    <section>
+      <h2>Парсинг текста</h2>
+      <label>userId (debug override, опционально)</label>
+      <input id="userId" value="demo_user" />
+      <label>Текст</label>
+      <textarea id="text" rows="3">Сегодня 300 на продукты и 200 на такси</textarea>
+      <button onclick="parseText()" id="parseButton">Отправить /parse-text</button>
+      <pre id="parseResult"></pre>
+      <button onclick="saveParsed()" id="saveButton">Сохранить транзакции</button>
+    </section>
+
+    <section>
+      <h2>Транзакции</h2>
+      <button onclick="loadTransactions()">Загрузить /transactions</button>
+      <pre id="transactions"></pre>
+    </section>
+
+    <section>
+      <h2>Сводка</h2>
+      <label>From</label>
+      <input id="summaryFrom" placeholder="2025-12-01" />
+      <label>To</label>
+      <input id="summaryTo" placeholder="2025-12-31" />
+      <button onclick="loadSummary()">Получить summary</button>
+      <pre id="summary"></pre>
+    </section>
+
+    <section>
+      <h2>Вопрос ассистенту</h2>
+      <label>Сообщение</label>
+      <textarea id="assistantMsg" rows="2">Сколько потратил на еду в этом месяце?</textarea>
+      <button onclick="askAssistant()">Спросить</button>
+      <pre id="assistant"></pre>
+    </section>
+
+    <script>
+      window.demoAuthToken = null;
+      window.demoUserId = null;
+      let lastParse;
+      window.lastParsedTransactions = null;
+      window.lastParsedSaved = false;
+      async function demoLogin() {
+        const userIdInput = document.getElementById('userId').value.trim();
+        const body = userIdInput ? { userId: userIdInput } : {};
+        const res = await fetch('/api/auth/demo-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        window.demoAuthToken = data.token;
+        window.demoUserId = data.user?.id;
+        document.getElementById('authStatus').textContent = `Токен получен для userId: ${window.demoUserId}`;
+      }
+      function requireAuth() {
+        if (!window.demoAuthToken) {
+          alert('Сначала выполните демо-логин');
+          return false;
+        }
+        return true;
+      }
+      function authHeaders() {
+        return window.demoAuthToken
+          ? { Authorization: 'Bearer ' + window.demoAuthToken }
+          : {};
+      }
+      async function parseText() {
+        if (!requireAuth()) return;
+        const body = { userId: document.getElementById('userId').value, text: document.getElementById('text').value };
+        const res = await fetch('/api/finance/parse-text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        lastParse = data;
+        window.lastParsedTransactions = data.transactions;
+        window.lastParsedSaved = false;
+        const saveBtn = document.getElementById('saveButton');
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Сохранить транзакции';
+        }
+        document.getElementById('parseResult').textContent = JSON.stringify(data, null, 2);
+      }
+      async function saveParsed() {
+        if (!window.lastParsedTransactions) return alert('Сначала распарсите текст');
+        if (window.lastParsedSaved) return alert('Эти транзакции уже сохранены');
+        const body = { items: lastParse.transactions.map(t => ({ ...t, userId: lastParse.userId })) };
+        const res = await fetch('/api/finance/transactions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        window.lastParsedSaved = true;
+        const saveBtn = document.getElementById('saveButton');
+        if (saveBtn) {
+          saveBtn.textContent = 'Сохранено';
+          saveBtn.disabled = true;
+        }
+        document.getElementById('transactions').textContent = JSON.stringify(data, null, 2);
+      }
+      async function loadTransactions() {
+        if (!requireAuth()) return;
+        const res = await fetch('/api/finance/transactions?limit=20', { headers: { ...authHeaders() } });
+        const data = await res.json();
+        document.getElementById('transactions').textContent = JSON.stringify(data, null, 2);
+      }
+      async function loadSummary() {
+        if (!requireAuth()) return;
+        const from = document.getElementById('summaryFrom').value;
+        const to = document.getElementById('summaryTo').value;
+        const params = new URLSearchParams({ from, to, groupBy: 'both' });
+        const res = await fetch('/api/finance/summary?' + params.toString(), { headers: { ...authHeaders() } });
+        const data = await res.json();
+        document.getElementById('summary').textContent = JSON.stringify(data, null, 2);
+      }
+      async function askAssistant() {
+        if (!requireAuth()) return;
+        const body = { userId: document.getElementById('userId').value, message: document.getElementById('assistantMsg').value };
+        const res = await fetch('/api/finance/assistant', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        document.getElementById('assistant').textContent = JSON.stringify(data, null, 2);
+      }
+    </script>
+  </body>
+</html>
