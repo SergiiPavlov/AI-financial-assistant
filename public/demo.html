@@ -10,31 +10,61 @@
       textarea, input, select { width: 100%; padding: 6px; }
       button { margin-top: 8px; padding: 8px 12px; }
       pre { background: #f5f5f5; padding: 8px; overflow-x: auto; }
-    </style>
+    
+
+table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
+th, td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; }
+th { background: #f0f0f0; }
+.muted { color: #666; font-size: 12px; }
+#summaryTables {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+</style>
   </head>
   <body>
     <h1>AI Financial Assistant</h1>
     <section>
-      <h2>Демо-логин</h2>
-      <p>Получите тестовый JWT и используйте его для всех запросов ниже.</p>
-      <button onclick="demoLogin()">Получить demo-токен</button>
-      <div id="authStatus">Токен не получен</div>
-    </section>
-    <section>
       <h2>Парсинг текста</h2>
-      <label>userId (debug override, опционально)</label>
+      <label>userId</label>
       <input id="userId" value="demo_user" />
       <label>Текст</label>
       <textarea id="text" rows="3">Сегодня 300 на продукты и 200 на такси</textarea>
-      <button onclick="parseText()" id="parseButton">Отправить /parse-text</button>
+      <button onclick="parseText()">Отправить /parse-text</button>
       <pre id="parseResult"></pre>
-      <button onclick="saveParsed()" id="saveButton">Сохранить транзакции</button>
+      <button id="saveParsedBtn" onclick="saveParsed()">Сохранить транзакции</button>
+    </section>
+
+    <section>
+      <h2>Голосовой ввод (файл)</h2>
+      <p class="muted">Шаг 1: выберите аудиофайл (webm/wav/m4a и т.п.), шаг 2: отправьте на /voice, затем при желании сохраните транзакции общей кнопкой ниже.</p>
+      <label>Аудиофайл</label>
+      <input id="voiceFile" type="file" accept="audio/*" />
+      <button onclick="parseVoice()">Отправить /voice</button>
+      <pre id="voiceResult"></pre>
     </section>
 
     <section>
       <h2>Транзакции</h2>
       <button onclick="loadTransactions()">Загрузить /transactions</button>
-      <pre id="transactions"></pre>
+      
+<pre id="transactions"></pre>
+<div class="muted">Таблица для быстрого просмотра:</div>
+<table id="transactionsTable">
+  <thead>
+    <tr>
+      <th>Дата</th>
+      <th>Категория</th>
+      <th>Сумма</th>
+      <th>Валюта</th>
+      <th>Описание</th>
+      <th>Источник</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
     </section>
 
     <section>
@@ -43,8 +73,30 @@
       <input id="summaryFrom" placeholder="2025-12-01" />
       <label>To</label>
       <input id="summaryTo" placeholder="2025-12-31" />
-      <button onclick="loadSummary()">Получить summary</button>
-      <pre id="summary"></pre>
+      <button onclick="getSummary()">Получить summary</button>
+      
+<pre id="summary"></pre>
+<div class="muted">Сводка по категориям и датам:</div>
+<div id="summaryTables">
+  <table id="summaryByCategory">
+    <thead>
+      <tr>
+        <th>Категория</th>
+        <th>Сумма</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <table id="summaryByDate">
+    <thead>
+      <tr>
+        <th>Дата</th>
+        <th>Сумма</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
     </section>
 
     <section>
@@ -56,98 +108,235 @@
     </section>
 
     <script>
-      window.demoAuthToken = null;
-      window.demoUserId = null;
       let lastParse;
-      window.lastParsedTransactions = null;
-      window.lastParsedSaved = false;
-      async function demoLogin() {
-        const userIdInput = document.getElementById('userId').value.trim();
-        const body = userIdInput ? { userId: userIdInput } : {};
-        const res = await fetch('/api/auth/demo-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
-        const data = await res.json();
-        window.demoAuthToken = data.token;
-        window.demoUserId = data.user?.id;
-        document.getElementById('authStatus').textContent = `Токен получен для userId: ${window.demoUserId}`;
-      }
-      function requireAuth() {
-        if (!window.demoAuthToken) {
-          alert('Сначала выполните демо-логин');
-          return false;
-        }
-        return true;
-      }
-      function authHeaders() {
-        return window.demoAuthToken
-          ? { Authorization: 'Bearer ' + window.demoAuthToken }
-          : {};
-      }
+      let lastSavedKey = null;
+
+      // lastSavedKey хранит fingerprint последнего успешно сохранённого набора транзакций для защиты от дублей.
+      // Он сбрасывается при новом parseText().
+
       async function parseText() {
-        if (!requireAuth()) return;
-        const body = { userId: document.getElementById('userId').value, text: document.getElementById('text').value };
+        const userIdInput = document.getElementById('userId');
+        const textInput = document.getElementById('text');
+        const userId = userIdInput ? userIdInput.value : '';
+        const text = textInput ? textInput.value : '';
         const res = await fetch('/api/finance/parse-text', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify(body)
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId, text })
         });
         const data = await res.json();
         lastParse = data;
-        window.lastParsedTransactions = data.transactions;
-        window.lastParsedSaved = false;
-        const saveBtn = document.getElementById('saveButton');
-        if (saveBtn) {
-          saveBtn.disabled = false;
-          saveBtn.textContent = 'Сохранить транзакции';
+        lastSavedKey = null;
+        const btn = document.getElementById('saveParsedBtn');
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Сохранить транзакции';
         }
-        document.getElementById('parseResult').textContent = JSON.stringify(data, null, 2);
+        const target = document.getElementById('parseResult');
+        if (target) {
+          target.textContent = JSON.stringify(data, null, 2);
+        }
+      
+
+            }
+
+async function parseVoice() {
+        const userIdInput = document.getElementById('userId');
+        const fileInput = document.getElementById('voiceFile');
+        const userId = userIdInput ? userIdInput.value : '';
+        if (!fileInput || !(fileInput instanceof HTMLInputElement) || !fileInput.files || fileInput.files.length === 0) {
+          alert('Сначала выберите аудиофайл.');
+          return;
+        }
+        const file = fileInput.files[0];
+        const form = new FormData();
+        if (userId) {
+          form.append('userId', userId);
+        }
+        form.append('file', file);
+
+        const res = await fetch('/api/finance/voice', {
+          method: 'POST',
+          body: form
+        });
+        const data = await res.json();
+        lastParse = data;
+        lastSavedKey = null;
+        const btn = document.getElementById('saveParsedBtn');
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Сохранить транзакции';
+        }
+        const target = document.getElementById('voiceResult');
+        if (target) {
+          target.textContent = JSON.stringify(data, null, 2);
+        }
       }
+
       async function saveParsed() {
-        if (!window.lastParsedTransactions) return alert('Сначала распарсите текст');
-        if (window.lastParsedSaved) return alert('Эти транзакции уже сохранены');
-        const body = { items: lastParse.transactions.map(t => ({ ...t, userId: lastParse.userId })) };
+        if (!lastParse || !Array.isArray(lastParse.transactions)) {
+          alert('Сначала распарсьте текст');
+          return;
+        }
+        const fingerprint = JSON.stringify({ userId: lastParse.userId, tx: lastParse.transactions });
+        if (lastSavedKey === fingerprint) {
+          alert('Эти транзакции уже сохранены');
+          return;
+        }
+        const items = lastParse.transactions.map(t => ({
+          ...t,
+          userId: lastParse.userId
+        }));
         const res = await fetch('/api/finance/transactions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify(body)
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items })
         });
         const data = await res.json();
-        window.lastParsedSaved = true;
-        const saveBtn = document.getElementById('saveButton');
-        if (saveBtn) {
-          saveBtn.textContent = 'Сохранено';
-          saveBtn.disabled = true;
+        lastSavedKey = fingerprint;
+        const btn = document.getElementById('saveParsedBtn');
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Сохранено';
         }
-        document.getElementById('transactions').textContent = JSON.stringify(data, null, 2);
+        const target = document.getElementById('transactions');
+        if (target) {
+          target.textContent = JSON.stringify(data, null, 2);
+        }
+        const list = Array.isArray(data.items) ? data.items : items;
+        renderTransactionsTable(list);
       }
+
       async function loadTransactions() {
-        if (!requireAuth()) return;
-        const res = await fetch('/api/finance/transactions?limit=20', { headers: { ...authHeaders() } });
+        const userIdInput = document.getElementById('userId');
+        const userId = userIdInput ? userIdInput.value : '';
+        const params = new URLSearchParams({ userId, page: '1', limit: '50' });
+        const res = await fetch('/api/finance/transactions?' + params.toString());
         const data = await res.json();
-        document.getElementById('transactions').textContent = JSON.stringify(data, null, 2);
+        const target = document.getElementById('transactions');
+        if (target) {
+          target.textContent = JSON.stringify(data, null, 2);
+        }
+        renderTransactionsTable(data.items || []);
       }
-      async function loadSummary() {
-        if (!requireAuth()) return;
-        const from = document.getElementById('summaryFrom').value;
-        const to = document.getElementById('summaryTo').value;
-        const params = new URLSearchParams({ from, to, groupBy: 'both' });
-        const res = await fetch('/api/finance/summary?' + params.toString(), { headers: { ...authHeaders() } });
+
+      function renderTransactionsTable(items) {
+        const tbody = document.querySelector('#transactionsTable tbody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        if (!items || !items.length) {
+          const row = document.createElement('tr');
+          const cell = document.createElement('td');
+          cell.colSpan = 6;
+          cell.textContent = 'Транзакций нет';
+          row.appendChild(cell);
+          tbody.appendChild(row);
+          return;
+        }
+        items.forEach(item => {
+          const row = document.createElement('tr');
+          const date = new Date(item.date);
+          const dateStr = isNaN(date.getTime()) ? (item.date || '') : date.toISOString().slice(0, 10);
+          const cells = [
+            dateStr,
+            item.category || '',
+            String(item.amount ?? ''),
+            item.currency || '',
+            item.description || '',
+            item.source || ''
+          ];
+          cells.forEach(value => {
+            const td = document.createElement('td');
+            td.textContent = value;
+            row.appendChild(td);
+          });
+          tbody.appendChild(row);
+        });
+      }
+
+      async function getSummary() {
+        const userIdInput = document.getElementById('userId');
+        const fromInput = document.getElementById('summaryFrom');
+        const toInput = document.getElementById('summaryTo');
+        const userId = userIdInput ? userIdInput.value : '';
+        const from = fromInput ? fromInput.value : '';
+        const to = toInput ? toInput.value : '';
+        const params = new URLSearchParams({ userId, from, to, groupBy: 'both' });
+        const res = await fetch('/api/finance/summary?' + params.toString());
         const data = await res.json();
-        document.getElementById('summary').textContent = JSON.stringify(data, null, 2);
+        const target = document.getElementById('summary');
+        if (target) {
+          target.textContent = JSON.stringify(data, null, 2);
+        }
+        renderSummaryTables(data);
       }
+
+      function renderSummaryTables(data) {
+        const byCatBody = document.querySelector('#summaryByCategory tbody');
+        const byDateBody = document.querySelector('#summaryByDate tbody');
+
+        if (byCatBody) {
+          byCatBody.innerHTML = '';
+          if (Array.isArray(data.byCategory) && data.byCategory.length) {
+            data.byCategory.forEach(row => {
+              const tr = document.createElement('tr');
+              const tdCat = document.createElement('td');
+              tdCat.textContent = row.category || '(без категории)';
+              const tdAmount = document.createElement('td');
+              tdAmount.textContent = String(row.amount ?? '');
+              tr.appendChild(tdCat);
+              tr.appendChild(tdAmount);
+              byCatBody.appendChild(tr);
+            });
+          } else {
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 2;
+            td.textContent = 'Нет данных';
+            tr.appendChild(td);
+            byCatBody.appendChild(tr);
+          }
+        }
+
+        if (byDateBody) {
+          byDateBody.innerHTML = '';
+          if (Array.isArray(data.byDate) && data.byDate.length) {
+            data.byDate.forEach(row => {
+              const tr = document.createElement('tr');
+              const tdDate = document.createElement('td');
+              tdDate.textContent = row.date || '';
+              const tdAmount = document.createElement('td');
+              tdAmount.textContent = String(row.amount ?? '');
+              tr.appendChild(tdDate);
+              tr.appendChild(tdAmount);
+              byDateBody.appendChild(tr);
+            });
+          } else {
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 2;
+            td.textContent = 'Нет данных';
+            tr.appendChild(td);
+            byDateBody.appendChild(tr);
+          }
+        }
+      }
+
       async function askAssistant() {
-        if (!requireAuth()) return;
-        const body = { userId: document.getElementById('userId').value, message: document.getElementById('assistantMsg').value };
+        const userIdInput = document.getElementById('userId');
+        const msgInput = document.getElementById('assistantMsg');
+        const userId = userIdInput ? userIdInput.value : '';
+        const message = msgInput ? msgInput.value : '';
         const res = await fetch('/api/finance/assistant', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify(body)
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId, message })
         });
         const data = await res.json();
-        document.getElementById('assistant').textContent = JSON.stringify(data, null, 2);
+        const target = document.getElementById('assistant');
+        if (target) {
+          target.textContent = JSON.stringify(data, null, 2);
+        }
       }
     </script>
   </body>

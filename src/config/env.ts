@@ -10,15 +10,13 @@ const requiredString = (value: string | undefined, name: string): string => {
 };
 
 const databaseUrl = requiredString(process.env.DATABASE_URL, "DATABASE_URL");
-const authJwtSecret = requiredString(process.env.AUTH_JWT_SECRET, "AUTH_JWT_SECRET");
 
 export const config = {
   nodeEnv: process.env.NODE_ENV || "development",
   port: parseInt(process.env.PORT || "4001", 10),
   databaseUrl,
   openAiApiKey: process.env.OPENAI_API_KEY || "",
-  aiFinanceModel: process.env.AI_FINANCE_MODEL || "gpt-4o-mini",
-  authJwtSecret
+  aiFinanceModel: process.env.AI_FINANCE_MODEL || "gpt-4o-mini"
 };
 
 export type AppConfig = typeof config;

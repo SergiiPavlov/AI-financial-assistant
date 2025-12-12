@@ -18,7 +18,6 @@ model User {
 model FinanceTransaction {
   id          String   @id @default(cuid())
   user        User     @relation(fields: [userId], references: [id])
-  /// Внешний идентификатор пользователя: должен совпадать с id пользователя из mini-CRM.
   userId      String
   date        DateTime
   amount      Decimal  @db.Decimal(14, 2)

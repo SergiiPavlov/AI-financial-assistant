@@ -3,7 +3,6 @@ import cors from "cors";
 import path from "path";
 import { config } from "./config/env";
 import { apiRouter } from "./routes";
-import { attachUserFromAuthHeader } from "./lib/auth";
 
 const app = express();
 
@@ -11,7 +10,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "../public")));
-app.use(attachUserFromAuthHeader(config));
 
 app.use("/api", apiRouter);
 

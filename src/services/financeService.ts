@@ -12,10 +12,6 @@ export type TransactionFilter = {
 };
 
 export type TransactionInput = {
-  /**
-   * Внешний идентификатор пользователя. Должен совпадать с id пользователя из mini-CRM
-   * после интеграции с auth, вся аналитика строится по этому значению.
-   */
   userId: string;
   date: Date;
   amount: number;

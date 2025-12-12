@@ -2,7 +2,7 @@ import { Router } from "express";
 import { callChatModel, MissingApiKeyError } from "../lib/llmClient";
 import { transcribeAudio } from "../lib/whisperClient";
 import { createTransactions, getSummary } from "../services/financeService";
-import { getEffectiveUserId } from "../lib/userContext";
+import { CATEGORY_IDS, normalizeCategoryId, getCategoryLabel, isCategoryId } from "../lib/categories";
 
 export const financeAiRouter = Router();
 
@@ -23,30 +23,52 @@ type ParseTextResult = {
   questions: string[];
 };
 
-const allowedCategories = [
-  "food",
-  "transport",
-  "bills",
-  "rent",
-  "health",
-  "fun",
-  "shopping",
-  "other"
-];
 
-const buildParserSystemPrompt = (todayIso: string) => `Ты — финансовый парсер. Всегда отвечай ТОЛЬКО валидным JSON без пояснений.
+const buildParserSystemPrompt = (todayIso: string) => {
+  const categoriesList = CATEGORY_IDS.join("|");
+  return `Ты — финансовый парсер. Пользователь может говорить по-русски, по-украински или по-английски.
+Всегда отвечай ТОЛЬКО валидным JSON без пояснений.
+
 Схема ответа:
 {
   "userId": "строка",
-  "recognizedText": "оригинальный текст",
+  "recognizedText": "оригинальный текст (как есть)",
   "transactions": [
-    { "date": "YYYY-MM-DD", "amount": число, "currency": "UAH", "category": "food|transport|bills|rent|health|fun|shopping|other", "description": "кратко", "source": "voice|manual|import" }
+    {
+      "date": "YYYY-MM-DD",
+      "amount": число,
+      "currency": "UAH",
+      "category": "${categoriesList}",
+      "description": "кратко",
+      "source": "voice|manual|import"
+    }
   ],
   "warnings": ["строки"],
   "questions": ["строки"]
 }
-Даты: если нет конкретной даты, используй сегодняшнюю (${todayIso}). Поддерживай фразы "сегодня", "вчера", "на выходных" (для выходных выбери ближайшие прошедшие выходные).
-Не выдумывай транзакции, используй только то, что есть в тексте. Если категория не ясна — используй "other" и добавь пояснение в warnings.`;
+
+Требования:
+- userId НЕ выдумывай, используй тот, что передан отдельно (НЕ из текста).
+- "transactions" — массив реальных операций из текста. Не добавляй ничего, чего в тексте нет.
+- "date":
+  - если дата явно указана — используй её;
+  - если сказано "сегодня" — используй "${todayIso}";
+  - если дата не указана — тоже используй "${todayIso}".
+- "amount" — только числа; игнорируй слова без суммы.
+- "currency":
+  - если в тексте явно названа валюта (UAH/грн/₴, USD/$, EUR/€ и т.п.) — поставь код валюты "UAH" | "USD" | "EUR";
+  - если валюта не указана, оставь поле "currency" пустой строкой "" (не придумывай валюту сам).
+- "category":
+  - всегда одно из: ${categoriesList};
+  - если не уверен — используй "other" и добавь пояснение в "warnings".
+- "description" — коротко по-русски или по-украински, что это за трата.
+- "source":
+  - "voice" для голосового ввода,
+  - "manual" для текстового ввода,
+  - "import" для данных из других систем.
+
+Если часть фразы непонятна — не придумывай сумму, лучше добавь вопрос в "questions".`;
+};
 
 const safeJsonParse = (text: string): any => {
   try {
@@ -55,6 +77,59 @@ const safeJsonParse = (text: string): any => {
     return undefined;
   }
 };
+
+
+const normalizeCurrencyCode = (raw: unknown): string | null => {
+  if (typeof raw !== "string") return null;
+  const text = raw.trim();
+  if (!text) return null;
+  const lower = text.toLowerCase();
+
+  if (lower.includes("uah") || lower.includes("грн") || lower.includes("грив")) {
+    return "UAH";
+  }
+  if (lower.includes("usd") || lower.includes("доллар") || lower.includes("бакс") || text.includes("$")) {
+    return "USD";
+  }
+  if (lower.includes("eur") || lower.includes("евро") || text.includes("€")) {
+    return "EUR";
+  }
+
+  // Already a clean code like "UAH" / "USD" / "EUR"
+  if (text === "UAH" || text === "USD" || text === "EUR") {
+    return text;
+  }
+
+  return null;
+};
+
+const applyCurrencyDefaults = (transactions: ParsedTransaction[]): { transactions: ParsedTransaction[]; warnings: string[] } => {
+  const warnings: string[] = [];
+  let lastCurrency: string | null = null;
+
+  const normalized = transactions.map((tx, index) => {
+    let currency = normalizeCurrencyCode(tx.currency);
+
+    if (currency) {
+      lastCurrency = currency;
+    } else if (lastCurrency) {
+      currency = lastCurrency;
+      warnings.push(
+        `В транзакции #${index + 1} сумма ${tx.amount} унаследовала валюту ${currency} из предыдущей операции.`
+      );
+    } else {
+      currency = "UAH";
+      warnings.push(
+        `В транзакции #${index + 1} сумма ${tx.amount} без указанной валюты — использована валюта по умолчанию UAH.`
+      );
+    }
+
+    return { ...tx, currency };
+  });
+
+  return { transactions: normalized, warnings };
+};
+
 
 const parseTransactionsWithLLM = async (userId: string, text: string): Promise<ParseTextResult> => {
   const today = new Date();
@@ -67,51 +142,48 @@ const parseTransactionsWithLLM = async (userId: string, text: string): Promise<P
     throw new Error("LLM returned non-JSON response");
   }
 
-  const transactions: ParsedTransaction[] = Array.isArray(parsed.transactions)
+  const rawTransactions: ParsedTransaction[] = Array.isArray(parsed.transactions)
     ? parsed.transactions
         .filter((t: any) => t && typeof t === "object")
         .map((t: any) => ({
           date: typeof t.date === "string" ? t.date : todayIso,
           amount: Number(t.amount) || 0,
-          currency: typeof t.currency === "string" ? t.currency : "UAH",
-          category: allowedCategories.includes(t.category) ? t.category : "other",
+          currency: typeof t.currency === "string" ? t.currency : "",
+          category: normalizeCategoryId(t.category),
           description: typeof t.description === "string" ? t.description : "",
           source: typeof t.source === "string" ? t.source : "voice"
         }))
     : [];
 
+  const { transactions, warnings: currencyWarnings } = applyCurrencyDefaults(rawTransactions);
+
   return {
     userId,
     recognizedText: parsed.recognizedText || text,
     transactions,
-    warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
+    warnings: [
+      ...(Array.isArray(parsed.warnings) ? parsed.warnings : []),
+      ...currencyWarnings
+    ],
     questions: Array.isArray(parsed.questions) ? parsed.questions : []
   };
 };
 
 financeAiRouter.post("/parse-text", async (req, res, next) => {
-  const start = Date.now();
   try {
-    const userId = getEffectiveUserId(req);
-    const { text } = req.body || {};
+    const { userId, text } = req.body || {};
+    if (typeof userId !== "string" || !userId.trim()) {
+      return res.status(400).json({ error: "userId is required" });
+    }
     if (typeof text !== "string" || !text.trim()) {
       return res.status(400).json({ error: "text is required" });
     }
 
     const result = await parseTransactionsWithLLM(userId, text);
-    console.log(
-      `[finance][parse-text] authUser=${req.user?.id ?? "none"} effectiveUser=${userId} textLength=${text.length} durationMs=${Date.now() - start} status=success transactions=${result.transactions.length}`
-    );
     res.json(result);
   } catch (error) {
-    console.log(
-      `[finance][parse-text] authUser=${req.user?.id ?? "none"} effectiveUser=${(req.body as any)?.userId ?? "unknown"} textLength=${req.body?.text?.length || 0} durationMs=${Date.now() - start} status=error message=${(error as Error).message}`
-    );
     if (error instanceof MissingApiKeyError) {
       return res.status(503).json({ error: error.message });
-    }
-    if (error instanceof Error && error.message.includes("userId is required")) {
-      return res.status(400).json({ error: error.message });
     }
     next(error);
   }
@@ -171,12 +243,12 @@ const parseMultipartForm = async (req: any) => {
 };
 
 financeAiRouter.post("/voice", async (req, res, next) => {
-  const start = Date.now();
   try {
     const { fields, files } = await parseMultipartForm(req);
-    const userIdFromForm = fields["userId"] || fields["userid"];
-    (req as any).body = { ...(req as any).body, userId: userIdFromForm };
-    const userId = getEffectiveUserId(req);
+    const userId = fields["userId"] || fields["userid"];
+    if (!userId) {
+      return res.status(400).json({ error: "userId is required" });
+    }
 
     const file = files[0];
     if (!file) {
@@ -185,19 +257,10 @@ financeAiRouter.post("/voice", async (req, res, next) => {
 
     const transcription = await transcribeAudio(file.data, file.fileName, file.mimeType);
     const parsed = await parseTransactionsWithLLM(userId, transcription.text);
-    console.log(
-      `[finance][voice] authUser=${req.user?.id ?? "none"} effectiveUser=${userId} textLength=${transcription.text.length} durationMs=${Date.now() - start} status=success transactions=${parsed.transactions.length}`
-    );
     res.json(parsed);
   } catch (error) {
-    console.log(
-      `[finance][voice] authUser=${req.user?.id ?? "none"} effectiveUser=${(req as any)?.body?.userId || "unknown"} durationMs=${Date.now() - start} status=error message=${(error as Error).message}`
-    );
     if (error instanceof MissingApiKeyError) {
       return res.status(503).json({ error: error.message });
-    }
-    if (error instanceof Error && error.message.includes("userId is required")) {
-      return res.status(400).json({ error: error.message });
     }
     if (error instanceof Error && error.message.includes("Whisper")) {
       return res.status(502).json({ error: error.message });
@@ -212,6 +275,78 @@ type AssistantInterpretation = {
   period: { from: string; to: string };
 };
 
+
+
+const addDaysUtc = (date: Date, days: number): Date => {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  d.setUTCDate(d.getUTCDate() + days);
+  return d;
+};
+
+const startOfIsoWeek = (date: Date): Date => {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = d.getUTCDay() || 7; // Sunday -> 7
+  const diff = day - 1; // days since Monday
+  d.setUTCDate(d.getUTCDate() - diff);
+  return d;
+};
+
+const detectWeekdayFromText = (lower: string): number | null => {
+  if (
+    lower.includes("понедельник") ||
+    lower.includes("понеділок") ||
+    lower.includes("monday")
+  ) {
+    return 1;
+  }
+  if (
+    lower.includes("вторник") ||
+    lower.includes("вiвторок") ||
+    lower.includes("вівторок") ||
+    lower.includes("tuesday")
+  ) {
+    return 2;
+  }
+  if (
+    lower.includes("среда") ||
+    lower.includes("середа") ||
+    lower.includes("wednesday")
+  ) {
+    return 3;
+  }
+  if (
+    lower.includes("четверг") ||
+    lower.includes("четвер") ||
+    lower.includes("thursday")
+  ) {
+    return 4;
+  }
+  if (
+    lower.includes("пятница") ||
+    lower.includes("пʼятниця") ||
+    lower.includes("пятницю") ||
+    lower.includes("п'ятниця") ||
+    lower.includes("friday")
+  ) {
+    return 5;
+  }
+  if (
+    lower.includes("суббота") ||
+    lower.includes("субота") ||
+    lower.includes("saturday")
+  ) {
+    return 6;
+  }
+  if (
+    lower.includes("воскресенье") ||
+    lower.includes("неділя") ||
+    lower.includes("sunday")
+  ) {
+    return 7;
+  }
+  return null;
+};
+
 const interpretAssistantQuestion = async (message: string): Promise<AssistantInterpretation> => {
   const today = new Date();
   const defaultFrom = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1))
@@ -219,27 +354,96 @@ const interpretAssistantQuestion = async (message: string): Promise<AssistantInt
     .split("T")[0];
   const defaultTo = today.toISOString().split("T")[0];
 
-  const systemPrompt = `Ты — финансовый помощник. Верни строго JSON без пояснений по схеме {"intent":"total|category|biggestCategory","category":"food|transport|bills|rent|health|fun|shopping|other|null","period":{"from":"YYYY-MM-DD","to":"YYYY-MM-DD"}}.
-Интенты:
-- "total" — запрос про все расходы без фокуса на категории.
-- "category" — запрос про конкретную категорию.
-- "biggestCategory" — запрос про самую затратную категорию.
 
-Категории и триггеры:
-food: ["еда", "продукты", "супермаркет", "магазин", "food", "restaurant", "кафе", "ресторан"]
-transport: ["такси", "транспорт", "метро", "автобус", "поезд", "самолет", "uber", "bolt"]
-bills: ["коммуналка", "счета", "услуги", "интернет", "свет", "вода", "газ"]
-rent: ["аренда", "квартира", "дом", "rent"]
-health: ["здоровье", "лекарства", "аптека", "медицина", "doctor"]
-fun: ["развлечения", "кино", "театр", "игры", "бар", "вечеринка"]
-shopping: ["покупки", "одежда", "shopping", "магазин одежды", "техника"]
-other: любые прочие расходы.
+  const lower = message.toLowerCase();
+  const hasTodayWord = lower.includes("сегодня") || lower.includes("сьогодні") || lower.includes("today");
+  const hasYesterdayWord = lower.includes("вчера") || lower.includes("вчора") || lower.includes("yesterday");
+  const hasDayBeforeYesterdayWord =
+    lower.includes("позавчера") ||
+    lower.includes("позавчора") ||
+    lower.includes("day before yesterday");
+  const hasLastWeekWord =
+    ((lower.includes("прошл") || lower.includes("минул")) && (lower.includes("недел") || lower.includes("тиж"))) ||
+    lower.includes("last week") ||
+    lower.includes("previous week");
+  const hasThisWeekWord =
+    lower.includes("эта недел") ||
+    lower.includes("этой недел") ||
+    lower.includes("ця неділ") ||
+    lower.includes("цей тиж") ||
+    lower.includes("цього тиж") ||
+    lower.includes("this week") ||
+    lower.includes("current week");
+  const hasLastMonthWord =
+    ((lower.includes("прошл") || lower.includes("минул")) &&
+      (lower.includes("месяц") || lower.includes("місяц") || lower.includes("місяць"))) ||
+    lower.includes("last month") ||
+    lower.includes("previous month");
+  const hasThisMonthWord =
+    lower.includes("этот месяц") ||
+    lower.includes("в этом месяце") ||
+    lower.includes("цей місяць") ||
+    lower.includes("цьому місяці") ||
+    lower.includes("this month") ||
+    lower.includes("current month");
+  const hasLastYearWord =
+    ((lower.includes("прошл") || lower.includes("минул")) &&
+      (lower.includes("год") || lower.includes("рік") || lower.includes("рок"))) ||
+    lower.includes("last year") ||
+    lower.includes("previous year");
+  const hasThisYearWord =
+    lower.includes("этот год") ||
+    lower.includes("в этом году") ||
+    lower.includes("цей рік") ||
+    lower.includes("цьому році") ||
+    lower.includes("this year") ||
+    lower.includes("current year");
+  const mentionsMonth =
+    lower.includes("месяц") ||
+    lower.includes("місяц") ||
+    lower.includes("місяць") ||
+    lower.includes("month");
+  const weekdayInText = detectWeekdayFromText(lower);
 
-Правила:
-- Если в вопросе явно названа категория или слово-триггер, обязательно возвращай intent: "category" и нормализованную category.
-- intent: "total" допустим только если пользователь спрашивает про все расходы целиком ("сколько всего потратил", "общая сумма" и т.п.).
-- Если категория не указана — ставь null. Если период не указан — возьми с ${defaultFrom} по ${defaultTo}.
-- Возвращай только JSON без текста вокруг.`;
+  const categoriesList = CATEGORY_IDS.join("|");
+
+  const systemPrompt = `Ты — финансовый помощник. Пользователь может задавать вопросы по-русски, по-украински или по-английски.
+Верни только JSON по схеме:
+{
+  "intent": "total" | "category" | "biggestCategory",
+  "category": "food" | "transport" | "bills" | "rent" | "health" | "fun" | "shopping" | "other" | null,
+  "period": { "from": "YYYY-MM-DD", "to": "YYYY-MM-DD" }
+}
+
+Пояснения:
+- "intent":
+  - "total" — если спрашивают об общей сумме расходов без конкретной категории;
+  - "category" — если явно интересуются одной категорией (еда, їжа, продукты, транспорт, коммуналка и т.п.);
+  - "biggestCategory" — если спрашивают «какая категория самая большая», «где больше всего трачу» и т.п.
+- "category":
+  - всегда одно из: ${'${'}categoriesList} или null;
+  - используй "food" для фраз вроде "еда", "продукты", "їжа", "продукти", "food";
+  - "transport" — для "транспорт", "проезд", "маршрутка", "такси", "таксі", "taxi", "transport";
+  - "bills" — для коммунальных платежей, счетов за свет/газ/воду, "коммуналка", "комуналка", "utilities";
+  - "rent" — для аренды жилья, "аренда квартиры", "оренда житла", "rent";
+  - "health" — для аптек, лекарств, врачей, "здоровье", "здоров'я", "medicine", "health";
+  - "fun" — для кино, игр, развлечений, подписок, "entertainment", "fun";
+  - "shopping" — для покупок одежды, техники и другого шопинга;
+  - если категория не указана или непонятна — используй null.
+- "period":
+  - если в вопросе есть конкретные даты — используй их;
+  - если спрашивают только про "сегодня" / "today" / "сьогодні" — установи обе даты равными сегодняшней (${''}${defaultTo});
+  - если спрашивают про "вчера" / "yesterday" — установи обе даты равными вчерашней дате;
+  - если спрашивают про "позавчера" — установи обе даты равными дате позавчера;
+  - если спрашивают про "прошлую неделю" / "на прошлой неделе" / "last week" — используй прошлую календарную неделю (с понедельника по воскресенье);
+  - если спрашивают про "эту неделю" / "на этой неделе" / "this week" — используй текущую календарную неделю;
+  - если спрашивают про "прошлый месяц" / "за прошлый месяц" / "last month" — выбери прошлый календарный месяц;
+  - если спрашивают про "этот месяц" / "в этом месяце" / "this month" — выбери текущий календарный месяц;
+  - если спрашивают про "прошлый год" / "за прошлый год" / "last year" — выбери прошлый календарный год;
+  - если спрашивают про "этот год" / "в этом году" / "this year" — выбери текущий календарный год;
+  - если указан месяц/год (например, "за октябрь", "for November") — выбери соответствующий период;
+  - если период не указан — возьми с ${'${'}defaultFrom} по ${'${'}defaultTo}.`;
+
   const response = await callChatModel({ systemPrompt, userPrompt: message });
   const parsed = safeJsonParse(response);
   if (!parsed || typeof parsed !== "object") {
@@ -247,38 +451,112 @@ other: любые прочие расходы.
   }
   const intent: AssistantInterpretation["intent"] =
     parsed.intent === "category" || parsed.intent === "biggestCategory" ? parsed.intent : "total";
-  const category = typeof parsed.category === "string" && allowedCategories.includes(parsed.category)
-    ? parsed.category
-    : null;
-  const periodFrom = typeof parsed?.period?.from === "string" ? parsed.period.from : defaultFrom;
-  const periodTo = typeof parsed?.period?.to === "string" ? parsed.period.to : defaultTo;
-  if (category && intent === "total") {
-    return {
-      intent: "category",
-      category,
-      period: { from: periodFrom, to: periodTo }
-    };
+
+  let category: string | null =
+    typeof (parsed as any).category === "string" && (parsed as any).category
+      ? normalizeCategoryId((parsed as any).category)
+      : null;
+
+  let periodFrom = typeof (parsed as any)?.period?.from === "string" ? (parsed as any).period.from : defaultFrom;
+  let periodTo = typeof (parsed as any)?.period?.to === "string" ? (parsed as any).period.to : defaultTo;
+
+  // Нормализуем период для относительных формулировок ("сегодня", "вчера", "на прошлой неделе" и т.п.)
+  if (hasTodayWord && !mentionsMonth) {
+    // сегодня
+    periodFrom = defaultTo;
+    periodTo = defaultTo;
+  } else if (hasYesterdayWord && !mentionsMonth) {
+    // вчера
+    const yesterday = addDaysUtc(today, -1);
+    const iso = yesterday.toISOString().split("T")[0];
+    periodFrom = iso;
+    periodTo = iso;
+  } else if (hasDayBeforeYesterdayWord && !mentionsMonth) {
+    // позавчера
+    const dayBeforeYesterday = addDaysUtc(today, -2);
+    const iso = dayBeforeYesterday.toISOString().split("T")[0];
+    periodFrom = iso;
+    periodTo = iso;
+  } else if (hasLastWeekWord) {
+    // прошлая неделя
+    const thisWeekStart = startOfIsoWeek(today);
+    const lastWeekStart = addDaysUtc(thisWeekStart, -7);
+
+    if (weekdayInText) {
+      // конкретный день прошлой недели, например "во вторник на прошлой неделе"
+      const target = addDaysUtc(lastWeekStart, weekdayInText - 1);
+      const iso = target.toISOString().split("T")[0];
+      periodFrom = iso;
+      periodTo = iso;
+    } else {
+      // вся прошлая неделя
+      const lastWeekEnd = addDaysUtc(lastWeekStart, 6);
+      periodFrom = lastWeekStart.toISOString().split("T")[0];
+      periodTo = lastWeekEnd.toISOString().split("T")[0];
+    }
+  } else if (hasThisWeekWord) {
+    // текущая неделя
+    const thisWeekStart = startOfIsoWeek(today);
+
+    if (weekdayInText) {
+      // конкретный день этой недели, например "в понедельник на этой неделе"
+      const target = addDaysUtc(thisWeekStart, weekdayInText - 1);
+      const iso = target.toISOString().split("T")[0];
+      periodFrom = iso;
+      periodTo = iso;
+    } else {
+      // вся текущая неделя
+      const thisWeekEnd = addDaysUtc(thisWeekStart, 6);
+      periodFrom = thisWeekStart.toISOString().split("T")[0];
+      periodTo = thisWeekEnd.toISOString().split("T")[0];
+    }
+  } else if (hasLastMonthWord) {
+    // прошлый месяц (полностью)
+    const prevMonthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
+    const prevMonthEnd = new Date(Date.UTC(prevMonthStart.getUTCFullYear(), prevMonthStart.getUTCMonth() + 1, 0));
+    periodFrom = prevMonthStart.toISOString().split("T")[0];
+    periodTo = prevMonthEnd.toISOString().split("T")[0];
+  } else if (hasThisMonthWord && mentionsMonth) {
+    // этот месяц (полностью)
+    const thisMonthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    const thisMonthEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0));
+    periodFrom = thisMonthStart.toISOString().split("T")[0];
+    periodTo = thisMonthEnd.toISOString().split("T")[0];
+  } else if (hasLastYearWord) {
+    // прошлый год (полностью)
+    const prevYear = today.getUTCFullYear() - 1;
+    const prevYearStart = new Date(Date.UTC(prevYear, 0, 1));
+    const prevYearEnd = new Date(Date.UTC(prevYear, 11, 31));
+    periodFrom = prevYearStart.toISOString().split("T")[0];
+    periodTo = prevYearEnd.toISOString().split("T")[0];
+  } else if (hasThisYearWord) {
+    // этот год (полностью)
+    const curYear = today.getUTCFullYear();
+    const curYearStart = new Date(Date.UTC(curYear, 0, 1));
+    const curYearEnd = new Date(Date.UTC(curYear, 11, 31));
+    periodFrom = curYearStart.toISOString().split("T")[0];
+    periodTo = curYearEnd.toISOString().split("T")[0];
   }
-  return {
+
+return {
     intent,
     category,
     period: { from: periodFrom, to: periodTo }
   };
 };
 
+
 financeAiRouter.post("/assistant", async (req, res, next) => {
-  const start = Date.now();
   try {
-    const userId = getEffectiveUserId(req);
-    const { message } = req.body || {};
+    const { userId, message } = req.body || {};
+    if (typeof userId !== "string" || !userId.trim()) {
+      return res.status(400).json({ error: "userId is required" });
+    }
     if (typeof message !== "string" || !message.trim()) {
       return res.status(400).json({ error: "message is required" });
     }
 
     const interpretation = await interpretAssistantQuestion(message);
-    console.log(
-      `[finance][assistant] authUser=${req.user?.id ?? "none"} effectiveUser=${userId} textLength=${message.length} durationMs=${Date.now() - start} status=interpreted intent=${interpretation.intent}`
-    );
     const summary = await getSummary({
       userId,
       from: new Date(interpretation.period.from),
@@ -286,38 +564,51 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
       groupBy: "both"
     });
 
+    // Нормализуем намерение: если модель вернула категорию, но intent не "category",
+    // и такая категория реально есть в сводке — считаем, что пользователь спрашивал именно про категорию.
+    let intent = interpretation.intent;
+    let category = interpretation.category;
+
+    if (
+      category &&
+      summary.byCategory.some((c) => c.category === category) &&
+      intent !== "category" &&
+      intent !== "biggestCategory"
+    ) {
+      intent = "category";
+    }
+
     let amount = summary.total;
-    let total = summary.total;
     let categoryAmount: number | undefined;
 
-    if (interpretation.intent === "category") {
-      categoryAmount = summary.byCategory.find((c) => c.category === interpretation.category)?.amount || 0;
+    if (intent === "category" && category) {
+      categoryAmount = summary.byCategory.find((c) => c.category === category)?.amount || 0;
       amount = categoryAmount;
     }
 
-    if (interpretation.intent === "biggestCategory") {
+    if (intent === "biggestCategory") {
       const biggest = summary.byCategory.reduce(
         (acc, curr) => (curr.amount > acc.amount ? curr : acc),
         { category: "", amount: 0 }
       );
-      interpretation.category = biggest.category || null;
+      category = biggest.category || null;
       categoryAmount = biggest.amount;
       amount = biggest.amount;
     }
 
-    const share = total > 0 ? Number((amount / total).toFixed(2)) : 0;
-    const categoryLabel = interpretation.category || "все категории";
-    let answer: string;
-
-    if (interpretation.intent === "category") {
-      const percent = (share * 100).toFixed(1);
-      answer = `За период с ${summary.period.from} по ${summary.period.to} по категории ${categoryLabel} сумма расходов составила ${amount}. Это ${percent}% от общей суммы ${total}.`;
-    } else if (interpretation.intent === "biggestCategory") {
-      const percent = (share * 100).toFixed(1);
-      answer = `Самая затратная категория за период с ${summary.period.from} по ${summary.period.to} — ${categoryLabel} с суммой ${amount} (${percent}% от всех расходов).`;
-    } else {
-      answer = `За период с ${summary.period.from} по ${summary.period.to} общая сумма расходов составила ${total}.`;
-    }
+    const share = summary.total > 0 ? Number((amount / summary.total).toFixed(2)) : 0;
+    const categoryLabel =
+      category && typeof category === "string" && isCategoryId(category)
+        ? getCategoryLabel(category, "ru")
+        : intent === "total"
+        ? "все категории"
+        : "неизвестная категория";
+    const answer =
+      intent === "biggestCategory"
+        ? `Самая затратная категория за период с ${summary.period.from} по ${summary.period.to} — ${categoryLabel} с суммой ${amount} (${share * 100}% от всех расходов).`
+        : intent === "category"
+        ? `За период с ${summary.period.from} по ${summary.period.to} по категории ${categoryLabel} сумма расходов составила ${amount}.`
+        : `За период с ${summary.period.from} по ${summary.period.to} общая сумма расходов по всем категориям составила ${amount}.`;
 
     res.json({
       userId,
@@ -325,21 +616,16 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
       answer,
       details: {
         period: summary.period,
-        category: interpretation.category,
+        category,
         amount,
-        total,
-        share
+        total: summary.total,
+        share,
+        intent
       }
     });
   } catch (error) {
-    console.log(
-      `[finance][assistant] authUser=${req.user?.id ?? "none"} effectiveUser=${(req.body as any)?.userId ?? "unknown"} textLength=${req.body?.message?.length || 0} durationMs=${Date.now() - start} status=error message=${(error as Error).message}`
-    );
     if (error instanceof MissingApiKeyError) {
       return res.status(503).json({ error: error.message });
-    }
-    if (error instanceof Error && error.message.includes("userId is required")) {
-      return res.status(400).json({ error: error.message });
     }
     next(error);
   }
@@ -347,10 +633,9 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
 
 financeAiRouter.post("/parse-and-save", async (req, res, next) => {
   try {
-    const userId = getEffectiveUserId(req);
-    const { text } = req.body || {};
-    if (!text) {
-      return res.status(400).json({ error: "text is required" });
+    const { userId, text } = req.body || {};
+    if (!userId || !text) {
+      return res.status(400).json({ error: "userId and text are required" });
     }
     const parsed = await parseTransactionsWithLLM(userId, text);
     const created = await createTransactions(
@@ -368,9 +653,6 @@ financeAiRouter.post("/parse-and-save", async (req, res, next) => {
   } catch (error) {
     if (error instanceof MissingApiKeyError) {
       return res.status(503).json({ error: error.message });
-    }
-    if (error instanceof Error && error.message.includes("userId is required")) {
-      return res.status(400).json({ error: error.message });
     }
     next(error);
   }

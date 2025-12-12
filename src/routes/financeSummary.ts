@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { getSummary, GroupByOption } from "../services/financeService";
-import { getEffectiveUserId } from "../lib/userContext";
 
 export const financeSummaryRouter = Router();
 
@@ -12,8 +11,10 @@ const parseDate = (value?: string): Date | undefined => {
 
 financeSummaryRouter.get("/", async (req, res, next) => {
   try {
-    const { from, to, groupBy } = req.query;
-    const userId = getEffectiveUserId(req);
+    const { userId, from, to, groupBy } = req.query;
+    if (typeof userId !== "string" || !userId.trim()) {
+      return res.status(400).json({ error: "userId is required" });
+    }
 
     const fromDate = typeof from === "string" ? parseDate(from) : undefined;
     const toDate = typeof to === "string" ? parseDate(to) : undefined;
@@ -33,10 +34,7 @@ financeSummaryRouter.get("/", async (req, res, next) => {
     });
 
     res.json(summary);
-  } catch (error: any) {
-    if (error instanceof Error && error.message.includes("userId is required")) {
-      return res.status(400).json({ error: error.message });
-    }
+  } catch (error) {
     next(error);
   }
 });
