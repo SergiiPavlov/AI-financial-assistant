@@ -208,34 +208,50 @@ export const createTransactionsBulkIdempotent = async (params: {
     throw new HttpError(400, `Too many transactions. Max ${maxItems} allowed`);
   }
 
-  const existingBatch = await prisma.financeImportBatch.findUnique({
-    where: { userId_batchId: { userId, batchId } }
-  });
-
-  if (existingBatch) {
-    const existingTransactions = await prisma.financeTransaction.findMany({
-      where: {
-        userId,
-        id: { in: existingBatch.transactionIds }
-      }
-    });
-
-    const itemsById = new Map(
-      existingTransactions.map((item) => [item.id, { ...item, amount: toNumber(item.amount) }])
-    );
-    const orderedItems = existingBatch.transactionIds
-      .map((id) => itemsById.get(id))
-      .filter((item): item is TransactionForExport => Boolean(item));
-
-    return {
-      duplicate: true,
-      batchId: existingBatch.batchId,
-      transactionIds: existingBatch.transactionIds,
-      items: orderedItems
-    };
-  }
-
   const result = await prisma.$transaction(async (tx) => {
+    try {
+      await tx.financeImportBatch.create({
+        data: {
+          userId,
+          batchId,
+          transactionIds: []
+        }
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const existingBatch = await tx.financeImportBatch.findUnique({
+          where: { userId_batchId: { userId, batchId } }
+        });
+
+        if (!existingBatch) {
+          throw error;
+        }
+
+        const existingTransactions = await tx.financeTransaction.findMany({
+          where: {
+            userId,
+            id: { in: existingBatch.transactionIds }
+          }
+        });
+
+        const itemsById = new Map(
+          existingTransactions.map((item) => [item.id, { ...item, amount: toNumber(item.amount) }])
+        );
+        const orderedItems = existingBatch.transactionIds
+          .map((id) => itemsById.get(id))
+          .filter((item): item is TransactionForExport => Boolean(item));
+
+        return {
+          duplicate: true,
+          batchId: existingBatch.batchId,
+          transactionIds: existingBatch.transactionIds,
+          items: orderedItems
+        };
+      }
+
+      throw error;
+    }
+
     const created: TransactionForExport[] = [];
     const transactionIds: string[] = [];
 
@@ -257,12 +273,9 @@ export const createTransactionsBulkIdempotent = async (params: {
       created.push({ ...createdTx, amount: toNumber(createdTx.amount) });
     }
 
-    await tx.financeImportBatch.create({
-      data: {
-        userId,
-        batchId,
-        transactionIds
-      }
+    await tx.financeImportBatch.update({
+      where: { userId_batchId: { userId, batchId } },
+      data: { transactionIds }
     });
 
     return {
