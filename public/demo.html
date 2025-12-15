@@ -155,6 +155,9 @@
   let lastParse = null;
   let lastSavedKey = null;
   let lastLoadedTransactions = [];
+  let lastSummaryData = null;
+  let categoriesMeta = [];
+  let categoryLabelById = {};
   const activeTxFilters = { from: '', to: '', category: '', page: 1, limit: 50 };
 
   const UI_TEXT = {
@@ -386,7 +389,51 @@
     langSelect.addEventListener('change', (e) => {
       currentUiLang = e.target.value;
       applyUiLang();
+      loadCategoriesForLang(currentUiLang);
+      renderTransactionsTable(lastLoadedTransactions);
+      if (lastSummaryData) {
+        renderSummaryTables(lastSummaryData);
+      }
     });
+  }
+
+  function setCategoriesMeta(meta) {
+    categoriesMeta = Array.isArray(meta) ? meta : [];
+    categoryLabelById = Object.fromEntries(categoriesMeta.map((c) => [c.id, c.label]));
+    renderCategoryFilterOptions();
+    renderTransactionsTable(lastLoadedTransactions);
+    if (lastSummaryData) {
+      renderSummaryTables(lastSummaryData);
+    }
+    updateTransactionsFilterInfo();
+  }
+
+  async function loadCategoriesForLang(lang) {
+    try {
+      const res = await fetch(`/api/finance/meta/categories?lang=${encodeURIComponent(lang || 'ru')}`);
+      if (!res.ok) {
+        throw new Error('Failed to load categories');
+      }
+      const data = await res.json();
+      setCategoriesMeta(data);
+    } catch (e) {
+      console.error(e);
+      setCategoriesMeta([]);
+    }
+  }
+
+  function getCategoryLabelForUi(id) {
+    if (!id) return t('msg_no_category');
+    return categoryLabelById[id] || t('msg_no_category');
+  }
+
+  function getCategoryIdByLabel(label) {
+    if (!label) return '';
+    const normalized = label.trim().toLowerCase();
+    const found = categoriesMeta.find(
+      (c) => c.id.toLowerCase() === normalized || c.label.toLowerCase() === normalized
+    );
+    return found ? found.id : '';
   }
 
   function setAccessToken(token) {
@@ -562,7 +609,7 @@
     const info = document.getElementById('txFiltersInfo');
     if (!info) return;
     const parts = [];
-    if (activeTxFilters.category) parts.push(`${t('filter_category')}: ${activeTxFilters.category}`);
+    if (activeTxFilters.category) parts.push(`${t('filter_category')}: ${getCategoryLabelForUi(activeTxFilters.category)}`);
     if (activeTxFilters.from) parts.push(`${t('filter_from')}: ${activeTxFilters.from}`);
     if (activeTxFilters.to) parts.push(`${t('filter_to')}: ${activeTxFilters.to}`);
     info.textContent = `${t('label_active_filters')} ${parts.length ? parts.join(', ') : t('filters_none')}`;
@@ -599,33 +646,23 @@
     await getSummary();
   }
 
-  function updateCategoryFilterOptions(items) {
+  function updateCategoryFilterOptions() {
     const select = document.getElementById('txCategoryFilter');
     if (!select) return;
-    const previous = select.value || '';
-    const categories = new Set();
-    if (Array.isArray(items)) {
-      items.forEach((tx) => {
-        if (tx && tx.category) categories.add(String(tx.category));
-      });
-    }
+    const previous = select.value || activeTxFilters.category || '';
     select.innerHTML = '';
     const baseOption = document.createElement('option');
     baseOption.value = '';
     baseOption.setAttribute('data-i18n', 'tx_category_all');
     baseOption.textContent = t('tx_category_all');
     select.appendChild(baseOption);
-    categories.forEach((cat) => {
+    categoriesMeta.forEach((cat) => {
       const opt = document.createElement('option');
-      opt.value = cat;
-      opt.textContent = cat;
+      opt.value = cat.id;
+      opt.textContent = cat.label;
       select.appendChild(opt);
     });
-    if (previous && (previous === '' || categories.has(previous))) {
-      select.value = previous;
-    } else {
-      select.value = '';
-    }
+    select.value = previous;
   }
 
   function applyCategoryFilterFromSelect() {
@@ -666,7 +703,7 @@
 
     const items = Array.isArray(data.items) ? data.items : [];
     lastLoadedTransactions = items.slice();
-    updateCategoryFilterOptions(items);
+    updateCategoryFilterOptions();
     renderTransactionsTable(items);
     updateTransactionsFilterInfo();
   }
@@ -692,7 +729,14 @@
       const row = document.createElement('tr');
       const date = new Date(item.date);
       const dateStr = isNaN(date.getTime()) ? (item.date || '') : date.toISOString().slice(0, 10);
-      const cells = [dateStr, item.category || '', String(item.amount ?? ''), item.currency || '', item.description || '', item.source || ''];
+      const cells = [
+        dateStr,
+        getCategoryLabelForUi(item.category),
+        String(item.amount ?? ''),
+        item.currency || '',
+        item.description || '',
+        item.source || ''
+      ];
       cells.forEach((value) => {
         const td = document.createElement('td');
         td.textContent = value;
@@ -747,7 +791,9 @@
       alert(t('msg_invalid_amount'));
       return;
     }
-    const newCategory = prompt(t('prompt_edit_category'), tx.category || '') || tx.category;
+    const categoryLabel = getCategoryLabelForUi(tx.category);
+    const newCategoryInput = prompt(t('prompt_edit_category'), categoryLabel) || categoryLabel;
+    const newCategory = getCategoryIdByLabel(newCategoryInput) || tx.category;
     const newDescription = prompt(t('prompt_edit_description'), tx.description || '') || tx.description;
 
     const res = await apiFetch('/api/finance/transactions/' + encodeURIComponent(id), {
@@ -778,6 +824,7 @@
     if (target) {
       target.textContent = JSON.stringify(data, null, 2);
     }
+    lastSummaryData = data;
     renderSummaryTables(data);
     activeTxFilters.from = from;
     activeTxFilters.to = to;
@@ -795,7 +842,7 @@
           tr.classList.add('drill-row');
           tr.dataset.category = String(row.category);
           const tdCat = document.createElement('td');
-          tdCat.textContent = row.category || t('msg_no_category');
+          tdCat.textContent = getCategoryLabelForUi(row.category);
           const tdAmount = document.createElement('td');
           tdAmount.textContent = String(row.amount ?? '');
           tr.appendChild(tdCat);
@@ -950,6 +997,7 @@
   async function bootstrap() {
     applyUiLang();
     renderAssistantExamples();
+    await loadCategoriesForLang(currentUiLang);
     if (accessToken) {
       await refreshAccessToken();
     }
