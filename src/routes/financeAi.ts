@@ -730,7 +730,8 @@ financeAiRouter.post("/parse-and-save", async (req, res, next) => {
         currency: t.currency,
         category: t.category,
         description: t.description,
-        source: t.source || "voice"
+        source: t.source || "voice",
+        type: t.type
       }))
     );
     res.status(201).json({ ...parsed, transactions: created });
