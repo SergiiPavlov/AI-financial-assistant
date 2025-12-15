@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 
 export type TransactionFilter = {
-  userId?: string;
+  userId: string;
   from?: Date;
   to?: Date;
   category?: string;
@@ -57,7 +57,7 @@ export const listTransactions = async (filter: TransactionFilter) => {
   const skip = (page - 1) * limit;
 
   const where: Prisma.FinanceTransactionWhereInput = {
-    ...(filter.userId ? { userId: filter.userId } : {}),
+    userId: filter.userId,
     ...(filter.category ? { category: filter.category } : {}),
     ...(filter.from || filter.to
       ? {
@@ -113,8 +113,11 @@ export const createTransactions = async (inputs: TransactionInput[]) => {
   }));
 };
 
-export const deleteTransaction = async (id: string) => {
-  await prisma.financeTransaction.delete({ where: { id } });
+export const deleteTransaction = async (id: string, userId: string) => {
+  const deleted = await prisma.financeTransaction.deleteMany({ where: { id, userId } });
+  if (deleted.count === 0) {
+    throw new Error("Transaction not found");
+  }
 };
 
 const validateTransactionUpdateInput = (input: TransactionUpdateInput) => {
@@ -153,11 +156,16 @@ const validateTransactionUpdateInput = (input: TransactionUpdateInput) => {
   return data;
 };
 
-export const updateTransaction = async (id: string, input: TransactionUpdateInput) => {
+export const updateTransaction = async (id: string, userId: string, input: TransactionUpdateInput) => {
   if (!id) {
     throw new Error("id is required");
   }
   const data = validateTransactionUpdateInput(input);
+  const existing = await prisma.financeTransaction.findUnique({ where: { id } });
+  if (!existing || existing.userId !== userId) {
+    throw new Error("Transaction not found");
+  }
+
   const updated = await prisma.financeTransaction.update({
     where: { id },
     data

@@ -1,962 +1,962 @@
 <!DOCTYPE html>
-
 <html lang="ru">
 <head>
 <meta charset="utf-8"/>
 <title>AI Financial Assistant Demo</title>
 <style>
-      body { font-family: Arial, sans-serif; margin: 20px; }
-      section { margin-bottom: 24px; padding: 12px; border: 1px solid #ccc; border-radius: 8px; }
-      label { display: block; margin: 6px 0 2px; }
-      textarea, input, select { width: 100%; padding: 6px; }
-      button { margin-top: 8px; padding: 8px 12px; }
-      pre { background: #f5f5f5; padding: 8px; overflow-x: auto; }
-    
-
-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
-th, td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; }
-th { background: #f0f0f0; }
-.muted { color: #666; font-size: 12px; }
-#summaryTables {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-  margin-top: 8px;
-}
-
-    .quick-ranges {
-      margin-top: 6px;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 6px;
-      font-size: 13px;
-    }
-    .quick-ranges span {
-      font-weight: 500;
-    }
-    .quick-examples {
-      margin-top: 6px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      font-size: 13px;
-    }
-    .quick-examples-buttons {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .quick-examples button,
-    .quick-ranges button {
-      padding: 4px 8px;
-      font-size: 12px;
-      cursor: pointer;
-    }
-    .quick-examples-label {
-      font-size: 12px;
-    }
-
-    .assistant-human {
-      margin-top: 8px;
-      padding: 8px;
-      border-radius: 6px;
-      background: #eef9ff;
-      font-size: 14px;
-      line-height: 1.4;
-      white-space: pre-wrap;
-    }
-
-    .drill-row { cursor: pointer; }
-    .drill-row:hover { background: #f7fbff; }
+  body { font-family: Arial, sans-serif; margin: 20px; }
+  section { margin-bottom: 24px; padding: 12px; border: 1px solid #ccc; border-radius: 8px; }
+  label { display: block; margin: 6px 0 2px; }
+  textarea, input, select { width: 100%; padding: 6px; }
+  button { margin-top: 8px; padding: 8px 12px; cursor: pointer; }
+  pre { background: #f5f5f5; padding: 8px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
+  th, td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; }
+  th { background: #f0f0f0; }
+  .muted { color: #666; font-size: 12px; }
+  #summaryTables { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 8px; }
+  .quick-ranges { margin-top: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+  .quick-ranges span { font-weight: 500; }
+  .quick-examples { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+  .quick-examples-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+  .quick-examples button, .quick-ranges button { padding: 4px 8px; font-size: 12px; cursor: pointer; }
+  .quick-examples-label { font-size: 12px; }
+  .assistant-human { margin-top: 8px; padding: 8px; border-radius: 6px; background: #eef9ff; font-size: 14px; line-height: 1.4; white-space: pre-wrap; }
+  .drill-row { cursor: pointer; }
+  .drill-row:hover { background: #f7fbff; }
+  .inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 </style>
 </head>
-<body><section id="uiLangSection"><label data-i18n="ui_lang_label" for="uiLangSelect">Язык интерфейса:</label><select id="uiLangSelect"><option value="ru">Русский</option><option value="uk">Українська</option><option value="en">English</option></select></section>
-<h1 data-i18n="title">AI Financial Assistant</h1>
-<section>
-<h2 data-i18n="section_parse_text">Парсинг текста</h2>
-<label data-i18n="label_user_id">userId</label>
-<input id="userId" value="demo_user"/>
-<label data-i18n="label_text">Текст</label>
-<textarea id="text" rows="3">Сегодня 300 на продукты и 200 на такси</textarea>
-<button data-i18n="btn_send_parse_text" onclick="parseText()">Отправить /parse-text</button>
-<pre id="parseResult"></pre><div class="muted" id="parseWarningsBlock" style="display:none;"><strong data-i18n="parse_warnings_title">Предупреждения</strong><ul id="parseWarningsList"></ul></div><div class="muted" id="parseQuestionsBlock" style="display:none;"><strong data-i18n="parse_questions_title">Вопросы для уточнения</strong><ul id="parseQuestionsList"></ul></div>
-<button data-i18n="btn_save_transactions" id="saveParsedBtn" onclick="saveParsed()">Сохранить транзакции</button>
-</section>
-<section>
-<h2 data-i18n="section_voice">Голосовой ввод (файл)</h2>
-<p class="muted">Шаг 1: выберите аудиофайл (webm/wav/m4a и т.п.), шаг 2: отправьте на /voice, затем при желании сохраните транзакции общей кнопкой ниже.</p>
-<label data-i18n="label_voice_file">Аудиофайл</label>
-<input accept="audio/*" id="voiceFile" type="file"/>
-<button data-i18n="btn_send_voice" onclick="parseVoice()">Отправить /voice</button>
-<pre id="voiceResult"></pre>
-</section>
-<section>
-<h2 data-i18n="section_transactions">Транзакции</h2>
-<div class="row">
-  <label for="txCategoryFilter" data-i18n="label_tx_category">Фильтр по категории</label>
-  <select id="txCategoryFilter">
-    <option value="" data-i18n="tx_category_all">Все категории</option>
-  </select>
-</div>
-<button data-i18n="btn_load_transactions" onclick="loadTransactions()">Загрузить /transactions</button>
-<pre id="transactions"></pre>
-<div class="muted" data-i18n="quick_table_hint">Таблица для быстрого просмотра:</div>
-<table id="transactionsTable">
-<thead>
-<tr>
-<th data-i18n="col_date">Дата</th>
-<th data-i18n="col_category">Категория</th>
-<th data-i18n="col_amount">Сумма</th>
-<th data-i18n="col_currency">Валюта</th>
-<th data-i18n="col_description">Описание</th>
-<th data-i18n="col_source">Источник</th>
-<th data-i18n="col_actions">Действия</th>
-</tr>
-</thead>
-<tbody></tbody>
-</table>
-</section>
-<section>
-<h2 data-i18n="section_summary">Сводка</h2>
-<label data-i18n="label_from">From</label>
-<input id="summaryFrom" placeholder="2025-12-01"/>
-<label data-i18n="label_to">To</label>
-<input id="summaryTo" placeholder="2025-12-31"/>
-<div class="quick-ranges">
-  <span data-i18n="summary_quick">Быстрые периоды:</span>
-  <button type="button" onclick="setSummaryRange('today')" data-i18n="summary_today">Сегодня</button>
-  <button type="button" onclick="setSummaryRange('week')" data-i18n="summary_week">Эта неделя</button>
-  <button type="button" onclick="setSummaryRange('month')" data-i18n="summary_month">Этот месяц</button>
-</div>
-<button data-i18n="btn_get_summary" onclick="getSummary()">Получить summary</button>
-<pre id="summary"></pre>
-<div class="muted" data-i18n="summary_hint">Сводка по категориям и датам:</div>
-<div class="muted" data-i18n="summary_drill_hint">Можно кликать по категориям и датам, чтобы фильтровать таблицу.</div>
-<div id="summaryTables">
-<table id="summaryByCategory">
-<thead>
-<tr>
-<th data-i18n="col_category">Категория</th>
-<th data-i18n="col_amount">Сумма</th>
-</tr>
-</thead>
-<tbody></tbody>
-</table>
-<table id="summaryByDate">
-<thead>
-<tr>
-<th data-i18n="col_date">Дата</th>
-<th data-i18n="col_amount">Сумма</th>
-</tr>
-</thead>
-<tbody></tbody>
-</table>
-</div>
-</section>
-<section>
-<h2 data-i18n="section_assistant">Вопрос ассистенту</h2>
-<label data-i18n="label_assistant_msg">Сообщение</label>
-<textarea id="assistantMsg" rows="2">Сколько потратил на еду в этом месяце?</textarea>
-<div id="assistantExamples" class="quick-examples"></div>
-<button data-i18n="btn_ask_assistant" onclick="askAssistant()">Спросить</button>
-<div id="assistantHuman" class="assistant-human"></div>
-<pre id="assistant"></pre>
-</section>
+<body>
+  <section id="uiLangSection">
+    <label data-i18n="ui_lang_label" for="uiLangSelect">Язык интерфейса:</label>
+    <select id="uiLangSelect">
+      <option value="ru">Русский</option>
+      <option value="uk">Українська</option>
+      <option value="en">English</option>
+    </select>
+  </section>
+
+  <h1 data-i18n="title">AI Financial Assistant</h1>
+
+  <section id="authSection">
+    <h2 data-i18n="section_auth">Авторизация</h2>
+    <label data-i18n="label_email">Email (опционально)</label>
+    <input id="emailInput" placeholder="demo_user@example.com" />
+    <div class="inline">
+      <button id="loginBtn" data-i18n="btn_login" onclick="login()">Login</button>
+      <button id="logoutBtn" data-i18n="btn_logout" onclick="logout()" disabled>Logout</button>
+      <span id="currentUser" class="muted" data-i18n="label_current_user">Current user: not logged in</span>
+    </div>
+  </section>
+
+  <section>
+    <h2 data-i18n="section_parse_text">Парсинг текста</h2>
+    <label data-i18n="label_text">Текст</label>
+    <textarea id="text" rows="3">Сегодня 300 на продукты и 200 на такси</textarea>
+    <button data-i18n="btn_send_parse_text" onclick="parseText()">Отправить /parse-text</button>
+    <pre id="parseResult"></pre>
+    <div class="muted" id="parseWarningsBlock" style="display:none;"><strong data-i18n="parse_warnings_title">Предупреждения</strong><ul id="parseWarningsList"></ul></div>
+    <div class="muted" id="parseQuestionsBlock" style="display:none;"><strong data-i18n="parse_questions_title">Вопросы для уточнения</strong><ul id="parseQuestionsList"></ul></div>
+    <button data-i18n="btn_save_transactions" id="saveParsedBtn" onclick="saveParsed()">Сохранить транзакции</button>
+  </section>
+
+  <section>
+    <h2 data-i18n="section_voice">Голосовой ввод (файл)</h2>
+    <p class="muted">Шаг 1: выберите аудиофайл (webm/wav/m4a и т.п.), шаг 2: отправьте на /voice, затем при желании сохраните транзакции общей кнопкой ниже.</p>
+    <label data-i18n="label_voice_file">Аудиофайл</label>
+    <input accept="audio/*" id="voiceFile" type="file"/>
+    <button data-i18n="btn_send_voice" onclick="parseVoice()">Отправить /voice</button>
+    <pre id="voiceResult"></pre>
+  </section>
+
+  <section>
+    <h2 data-i18n="section_transactions">Транзакции</h2>
+    <div class="inline">
+      <label for="txCategoryFilter" data-i18n="label_tx_category">Фильтр по категории</label>
+      <select id="txCategoryFilter">
+        <option value="" data-i18n="tx_category_all">Все категории</option>
+      </select>
+      <label for="txLimit" data-i18n="label_limit">Лимит</label>
+      <input id="txLimit" type="number" value="50" min="1" max="200" style="width:90px" />
+    </div>
+    <div id="txFiltersInfo" class="muted"></div>
+    <button data-i18n="btn_load_transactions" onclick="loadTransactions()">Загрузить /transactions</button>
+    <pre id="transactions"></pre>
+    <div class="muted" data-i18n="quick_table_hint">Таблица для быстрого просмотра:</div>
+    <table id="transactionsTable">
+      <thead>
+        <tr>
+          <th data-i18n="col_date">Дата</th>
+          <th data-i18n="col_category">Категория</th>
+          <th data-i18n="col_amount">Сумма</th>
+          <th data-i18n="col_currency">Валюта</th>
+          <th data-i18n="col_description">Описание</th>
+          <th data-i18n="col_source">Источник</th>
+          <th data-i18n="col_actions">Действия</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2 data-i18n="section_summary">Сводка</h2>
+    <label data-i18n="label_from">From</label>
+    <input id="summaryFrom" placeholder="2025-12-01"/>
+    <label data-i18n="label_to">To</label>
+    <input id="summaryTo" placeholder="2025-12-31"/>
+    <div class="quick-ranges">
+      <span data-i18n="summary_quick">Быстрые периоды:</span>
+      <button type="button" onclick="setSummaryRange('today')" data-i18n="summary_today">Сегодня</button>
+      <button type="button" onclick="setSummaryRange('week')" data-i18n="summary_week">Эта неделя</button>
+      <button type="button" onclick="setSummaryRange('month')" data-i18n="summary_month">Этот месяц</button>
+    </div>
+    <button data-i18n="btn_get_summary" onclick="getSummary()">Получить summary</button>
+    <pre id="summary"></pre>
+    <div class="muted" data-i18n="summary_hint">Сводка по категориям и датам:</div>
+    <div class="muted" data-i18n="summary_drill_hint">Можно кликать по категориям и датам, чтобы фильтровать таблицу.</div>
+    <div id="summaryTables">
+      <table id="summaryByCategory">
+        <thead>
+          <tr>
+            <th data-i18n="col_category">Категория</th>
+            <th data-i18n="col_amount">Сумма</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <table id="summaryByDate">
+        <thead>
+          <tr>
+            <th data-i18n="col_date">Дата</th>
+            <th data-i18n="col_amount">Сумма</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2 data-i18n="section_assistant">Вопрос ассистенту</h2>
+    <label data-i18n="label_assistant_msg">Сообщение</label>
+    <textarea id="assistantMsg" rows="2">Сколько потратил на еду в этом месяце?</textarea>
+    <div id="assistantExamples" class="quick-examples"></div>
+    <button data-i18n="btn_ask_assistant" onclick="askAssistant()">Спросить</button>
+    <div id="assistantHuman" class="assistant-human"></div>
+    <pre id="assistant"></pre>
+  </section>
+
 <script>
+  let currentUiLang = 'ru';
+  let accessToken = localStorage.getItem('demoAccessToken') || '';
+  let currentUser = null;
+  let lastParse = null;
+  let lastSavedKey = null;
+  let lastLoadedTransactions = [];
+  const activeTxFilters = { from: '', to: '', category: '', page: 1, limit: 50 };
 
-      // --- Simple UI i18n (ru / uk / en) ---
-      let currentUiLang = 'ru';
+  const UI_TEXT = {
+    ru: {
+      ui_lang_label: 'Язык интерфейса:',
+      title: 'AI Financial Assistant',
+      section_auth: 'Авторизация',
+      section_parse_text: 'Парсинг текста',
+      section_voice: 'Голосовой ввод (файл)',
+      section_transactions: 'Транзакции',
+      section_summary: 'Сводка',
+      section_assistant: 'Вопрос ассистенту',
+      label_email: 'Email (опционально)',
+      label_current_user: 'Текущий пользователь:',
+      label_not_logged_in: 'не залогинен',
+      label_text: 'Текст',
+      label_voice_file: 'Аудиофайл',
+      label_from: 'From',
+      label_to: 'To',
+      label_assistant_msg: 'Сообщение',
+      label_tx_category: 'Фильтр по категории',
+      label_limit: 'Лимит',
+      tx_category_all: 'Все категории',
+      btn_login: 'Login',
+      btn_logout: 'Logout',
+      btn_send_parse_text: 'Отправить /parse-text',
+      btn_save_transactions: 'Сохранить транзакции',
+      btn_save_transactions_done: 'Сохранено',
+      btn_send_voice: 'Отправить /voice',
+      btn_load_transactions: 'Загрузить /transactions',
+      btn_get_summary: 'Получить summary',
+      btn_ask_assistant: 'Спросить',
+      summary_hint: 'Сводка по категориям и датам:',
+      summary_drill_hint: 'Можно кликать по категориям и датам, чтобы фильтровать таблицу транзакций.',
+      col_date: 'Дата',
+      col_category: 'Категория',
+      col_amount: 'Сумма',
+      col_currency: 'Валюта',
+      col_description: 'Описание',
+      col_source: 'Источник',
+      quick_table_hint: 'Таблица для быстрого просмотра:',
+      parse_warnings_title: 'Предупреждения',
+      parse_questions_title: 'Вопросы для уточнения',
+      msg_select_file_first: 'Сначала выберите аудиофайл.',
+      msg_parse_text_first: 'Сначала распарсьте текст',
+      msg_already_saved: 'Эти транзакции уже сохранены',
+      msg_no_transactions: 'Транзакций нет',
+      msg_no_category: '(без категории)',
+      msg_no_data: 'Нет данных',
+      col_actions: 'Действия',
+      btn_edit: 'Правка',
+      btn_delete: 'Удалить',
+      confirm_delete: 'Удалить эту транзакцию?',
+      prompt_edit_amount: 'Новая сумма:',
+      prompt_edit_category: 'Новая категория:',
+      prompt_edit_description: 'Новое описание:',
+      msg_invalid_amount: 'Сумма должна быть положительным числом.',
+      msg_login_required: 'Сначала выполните вход.',
+      label_active_filters: 'Активные фильтры:',
+      filters_none: 'нет',
+      filter_category: 'категория',
+      filter_from: 'from',
+      filter_to: 'to',
+      summary_quick: 'Быстрые периоды:',
+      summary_today: 'Сегодня',
+      summary_week: 'Эта неделя',
+      summary_month: 'Этот месяц'
+    },
+    uk: {
+      ui_lang_label: 'Мова інтерфейсу:',
+      title: 'Голосовий фінансовий асистент',
+      section_auth: 'Авторизація',
+      section_parse_text: 'Парсинг тексту',
+      section_voice: 'Голосове введення (файл)',
+      section_transactions: 'Транзакції',
+      section_summary: 'Підсумок',
+      section_assistant: 'Питання асистенту',
+      label_email: 'Email (опційно)',
+      label_current_user: 'Поточний користувач:',
+      label_not_logged_in: 'не залогінений',
+      label_text: 'Текст',
+      label_voice_file: 'Аудіофайл',
+      label_from: 'З',
+      label_to: 'По',
+      label_assistant_msg: 'Повідомлення',
+      label_tx_category: 'Фільтр за категорією',
+      label_limit: 'Ліміт',
+      tx_category_all: 'Усі категорії',
+      btn_login: 'Login',
+      btn_logout: 'Logout',
+      btn_send_parse_text: 'Надіслати /parse-text',
+      btn_save_transactions: 'Зберегти транзакції',
+      btn_save_transactions_done: 'Збережено',
+      btn_send_voice: 'Надіслати /voice',
+      btn_load_transactions: 'Завантажити /transactions',
+      btn_get_summary: 'Отримати summary',
+      btn_ask_assistant: 'Спитати',
+      summary_hint: 'Підсумок за категоріями та датами:',
+      summary_drill_hint: 'Можна клікати по категоріях і датах, щоб фільтрувати таблицю транзакцій.',
+      col_date: 'Дата',
+      col_category: 'Категорія',
+      col_amount: 'Сума',
+      col_currency: 'Валюта',
+      col_description: 'Опис',
+      col_source: 'Джерело',
+      quick_table_hint: 'Таблиця для швидкого перегляду:',
+      parse_warnings_title: 'Попередження',
+      parse_questions_title: 'Питання для уточнення',
+      msg_select_file_first: 'Спочатку виберіть аудіофайл.',
+      msg_parse_text_first: 'Спочатку розберіть текст.',
+      msg_already_saved: 'Ці транзакції вже збережені.',
+      msg_no_transactions: 'Транзакцій немає',
+      msg_no_category: '(без категорії)',
+      msg_no_data: 'Немає даних',
+      col_actions: 'Дії',
+      btn_edit: 'Редагувати',
+      btn_delete: 'Видалити',
+      confirm_delete: 'Видалити цю транзакцію?',
+      prompt_edit_amount: 'Нова сума:',
+      prompt_edit_category: 'Нова категорія:',
+      prompt_edit_description: 'Новий опис:',
+      msg_invalid_amount: 'Сума має бути додатнім числом.',
+      msg_login_required: 'Спочатку виконайте вхід.',
+      label_active_filters: 'Активні фільтри:',
+      filters_none: 'немає',
+      filter_category: 'категорія',
+      filter_from: 'з',
+      filter_to: 'по',
+      summary_quick: 'Швидкі періоди:',
+      summary_today: 'Сьогодні',
+      summary_week: 'Цей тиждень',
+      summary_month: 'Цей місяць'
+    },
+    en: {
+      ui_lang_label: 'Interface language:',
+      title: 'AI Financial Assistant',
+      section_auth: 'Authentication',
+      section_parse_text: 'Text parsing',
+      section_voice: 'Voice input (file)',
+      section_transactions: 'Transactions',
+      section_summary: 'Summary',
+      section_assistant: 'Ask the assistant',
+      label_email: 'Email (optional)',
+      label_current_user: 'Current user:',
+      label_not_logged_in: 'not logged in',
+      label_text: 'Text',
+      label_voice_file: 'Audio file',
+      label_from: 'From',
+      label_to: 'To',
+      label_assistant_msg: 'Message',
+      label_tx_category: 'Category filter',
+      label_limit: 'Limit',
+      tx_category_all: 'All categories',
+      btn_login: 'Login',
+      btn_logout: 'Logout',
+      btn_send_parse_text: 'Send /parse-text',
+      btn_save_transactions: 'Save transactions',
+      btn_save_transactions_done: 'Saved',
+      btn_send_voice: 'Send /voice',
+      btn_load_transactions: 'Load /transactions',
+      btn_get_summary: 'Get summary',
+      btn_ask_assistant: 'Ask',
+      summary_hint: 'Summary by categories and dates:',
+      summary_drill_hint: 'Click categories or dates to filter the transactions table.',
+      col_date: 'Date',
+      col_category: 'Category',
+      col_amount: 'Amount',
+      col_currency: 'Currency',
+      col_description: 'Description',
+      col_source: 'Source',
+      quick_table_hint: 'Quick table:',
+      parse_warnings_title: 'Warnings',
+      parse_questions_title: 'Clarifying questions',
+      msg_select_file_first: 'Select an audio file first.',
+      msg_parse_text_first: 'Parse the text first.',
+      msg_already_saved: 'These transactions are already saved.',
+      msg_no_transactions: 'No transactions',
+      msg_no_category: '(no category)',
+      msg_no_data: 'No data',
+      col_actions: 'Actions',
+      btn_edit: 'Edit',
+      btn_delete: 'Delete',
+      confirm_delete: 'Delete this transaction?',
+      prompt_edit_amount: 'New amount:',
+      prompt_edit_category: 'New category:',
+      prompt_edit_description: 'New description:',
+      msg_invalid_amount: 'Amount must be a positive number.',
+      msg_login_required: 'Please login first.',
+      label_active_filters: 'Active filters:',
+      filters_none: 'none',
+      filter_category: 'category',
+      filter_from: 'from',
+      filter_to: 'to',
+      summary_quick: 'Quick ranges:',
+      summary_today: 'Today',
+      summary_week: 'This week',
+      summary_month: 'This month'
+    }
+  };
 
-      const UI_TEXT = {
-        ru: {
-          ui_lang_label: 'Язык интерфейса:',
-          title: 'AI Financial Assistant',
-          section_parse_text: 'Парсинг текста',
-          section_voice: 'Голосовой ввод (файл)',
-          section_transactions: 'Транзакции',
-          section_summary: 'Сводка',
-          section_assistant: 'Вопрос ассистенту',
-          label_user_id: 'userId',
-          label_text: 'Текст',
-          label_voice_file: 'Аудиофайл',
-          label_from: 'From',
-          label_to: 'To',
-          label_assistant_msg: 'Сообщение',
-          label_tx_category: 'Фильтр по категории',
-          tx_category_all: 'Все категории',
-          btn_send_parse_text: 'Отправить /parse-text',
-          btn_save_transactions: 'Сохранить транзакции',
-          btn_save_transactions_done: 'Сохранено',
-          btn_send_voice: 'Отправить /voice',
-          btn_load_transactions: 'Загрузить /transactions',
-          btn_get_summary: 'Получить summary',
-          btn_ask_assistant: 'Спросить',
-          summary_hint: 'Сводка по категориям и датам:',
-          summary_drill_hint: 'Можно кликать по категориям и датам, чтобы фильтровать таблицу транзакций.',
-          col_date: 'Дата',
-          col_category: 'Категория',
-          col_amount: 'Сумма',
-          col_currency: 'Валюта',
-          col_description: 'Описание',
-          col_source: 'Источник',
-          quick_table_hint: 'Таблица для быстрого просмотра:',
-          parse_warnings_title: 'Предупреждения',
-          parse_questions_title: 'Вопросы для уточнения',
-          msg_select_file_first: 'Сначала выберите аудиофайл.',
-          msg_parse_text_first: 'Сначала распарсьте текст',
-          msg_already_saved: 'Эти транзакции уже сохранены',
-          msg_no_transactions: 'Транзакций нет',
-          msg_no_category: '(без категории)',
-          msg_no_data: 'Нет данных',
-          col_actions: 'Действия',
-          btn_edit: 'Правка',
-          btn_delete: 'Удалить',
-          confirm_delete: 'Удалить эту транзакцию?',
-          prompt_edit_amount: 'Новая сумма:',
-          prompt_edit_category: 'Новая категория:',
-          prompt_edit_description: 'Новое описание:',
-          msg_invalid_amount: 'Сумма должна быть положительным числом.'
-        },
-        uk: {
-          ui_lang_label: 'Мова інтерфейсу:',
-          title: 'Голосовий фінансовий асистент',
-          section_parse_text: 'Парсинг тексту',
-          section_voice: 'Голосове введення (файл)',
-          section_transactions: 'Транзакції',
-          section_summary: 'Підсумок',
-          section_assistant: 'Питання асистенту',
-          label_user_id: 'userId',
-          label_text: 'Текст',
-          label_voice_file: 'Аудіофайл',
-          label_from: 'З',
-          label_to: 'По',
-          label_assistant_msg: 'Повідомлення',
-          label_tx_category: 'Фільтр за категорією',
-          tx_category_all: 'Усі категорії',
-          btn_send_parse_text: 'Надіслати /parse-text',
-          btn_save_transactions: 'Зберегти транзакції',
-          btn_save_transactions_done: 'Збережено',
-          btn_send_voice: 'Надіслати /voice',
-          btn_load_transactions: 'Завантажити /transactions',
-          btn_get_summary: 'Отримати summary',
-          btn_ask_assistant: 'Спитати',
-          summary_hint: 'Підсумок за категоріями та датами:',
-          summary_drill_hint: 'Можна клікати по категоріях і датах, щоб фільтрувати таблицю транзакцій.',
-          col_date: 'Дата',
-          col_category: 'Категорія',
-          col_amount: 'Сума',
-          col_currency: 'Валюта',
-          col_description: 'Опис',
-          col_source: 'Джерело',
-          quick_table_hint: 'Таблиця для швидкого перегляду:',
-          parse_warnings_title: 'Попередження',
-          parse_questions_title: 'Питання для уточнення',
-          msg_select_file_first: 'Спочатку виберіть аудіофайл.',
-          msg_parse_text_first: 'Спочатку розберіть текст.',
-          msg_already_saved: 'Ці транзакції вже збережені.',
-          msg_no_transactions: 'Транзакцій немає',
-          msg_no_category: '(без категорії)',
-          msg_no_data: 'Немає даних'
-        },
-        en: {
-          ui_lang_label: 'Interface language:',
-          title: 'AI Financial Assistant',
-          section_parse_text: 'Text parsing',
-          section_voice: 'Voice input (file)',
-          section_transactions: 'Transactions',
-          section_summary: 'Summary',
-          section_assistant: 'Ask the assistant',
-          label_user_id: 'userId',
-          label_text: 'Text',
-          label_voice_file: 'Audio file',
-          label_from: 'From',
-          label_to: 'To',
-          label_assistant_msg: 'Message',
-          label_tx_category: 'Category filter',
-          tx_category_all: 'All categories',
-          btn_send_parse_text: 'Send /parse-text',
-          btn_save_transactions: 'Save transactions',
-          btn_save_transactions_done: 'Saved',
-          btn_send_voice: 'Send /voice',
-          btn_load_transactions: 'Load /transactions',
-          btn_get_summary: 'Get summary',
-          btn_ask_assistant: 'Ask',
-          summary_hint: 'Summary by categories and dates:',
-          summary_drill_hint: 'Click categories or dates to filter the transactions table.',
-          col_date: 'Date',
-          col_category: 'Category',
-          col_amount: 'Amount',
-          col_currency: 'Currency',
-          col_description: 'Description',
-          col_source: 'Source',
-          quick_table_hint: 'Quick table:',
-          parse_warnings_title: 'Warnings',
-          parse_questions_title: 'Clarifying questions',
-          msg_select_file_first: 'Select an audio file first.',
-          msg_parse_text_first: 'Parse the text first.',
-          msg_already_saved: 'These transactions are already saved.',
-          msg_no_transactions: 'No transactions',
-          msg_no_category: '(no category)',
-          msg_no_data: 'No data'
-        }
-      };
+  function t(key) {
+    const lang = UI_TEXT[currentUiLang] ? currentUiLang : 'ru';
+    return (UI_TEXT[lang] && UI_TEXT[lang][key]) || (UI_TEXT['ru'] && UI_TEXT['ru'][key]) || key;
+  }
 
-      function t(key) {
-        const lang = UI_TEXT[currentUiLang] ? currentUiLang : 'ru';
-        return (UI_TEXT[lang] && UI_TEXT[lang][key]) || (UI_TEXT['ru'] && UI_TEXT['ru'][key]) || key;
-      }
-
-      function applyUiLang() {
-        const lang = UI_TEXT[currentUiLang] ? currentUiLang : 'ru';
-        const map = UI_TEXT[lang] || UI_TEXT['ru'];
-        // update label for language selector itself
-        const langLabel = document.querySelector('label[for="uiLangSelect"][data-i18n="ui_lang_label"]');
-        if (langLabel && map.ui_lang_label) {
-          langLabel.textContent = map.ui_lang_label;
-        }
-        Object.keys(map).forEach((key) => {
-          const nodes = document.querySelectorAll('[data-i18n="' + key + '"]');
-          nodes.forEach((el) => {
-            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
-              el.setAttribute('placeholder', map[key]);
-            } else {
-              el.textContent = map[key];
-            }
-          });
-        });
-      }
-
-      document.addEventListener('DOMContentLoaded', () => {
-        const select = document.getElementById('uiLangSelect');
-        if (select) {
-          select.value = currentUiLang;
-          select.addEventListener('change', () => {
-            currentUiLang = select.value || 'ru';
-            applyUiLang();
-          });
-        }
-
-        const categorySelect = document.getElementById('txCategoryFilter');
-        if (categorySelect) {
-          categorySelect.addEventListener('change', () => {
-            if (Array.isArray(lastLoadedTransactions)) {
-              renderTransactionsTable(lastLoadedTransactions);
-            }
-          });
-        }
-
-        applyUiLang();
-        initSummaryDrillDown();
-      });
-
-      // --- Helper to render warnings & questions from LLM parse result ---
-      function renderWarningsAndQuestions(result) {
-        try {
-          const warningsBlock = document.getElementById('parseWarningsBlock');
-          const questionsBlock = document.getElementById('parseQuestionsBlock');
-          const warningsList = document.getElementById('parseWarningsList');
-          const questionsList = document.getElementById('parseQuestionsList');
-          if (!warningsBlock || !questionsBlock || !warningsList || !questionsList) return;
-
-          // Clear previous
-          warningsList.innerHTML = '';
-          questionsList.innerHTML = '';
-
-          const warnings = Array.isArray(result && result.warnings) ? result.warnings : [];
-          const questions = Array.isArray(result && result.questions) ? result.questions : [];
-
-          if (warnings.length > 0) {
-            warningsBlock.style.display = 'block';
-            warnings.forEach((w) => {
-              const li = document.createElement('li');
-              li.textContent = w;
-              warningsList.appendChild(li);
-            });
-          } else {
-            warningsBlock.style.display = 'none';
-          }
-
-          if (questions.length > 0) {
-            questionsBlock.style.display = 'block';
-            questions.forEach((q) => {
-              const li = document.createElement('li');
-              li.textContent = q;
-              questionsList.appendChild(li);
-            });
-          } else {
-            questionsBlock.style.display = 'none';
-          }
-        } catch (e) {
-          console.warn('renderWarningsAndQuestions error', e);
-        }
-      }
-
-      let lastParse;
-      let lastSavedKey = null;
-      let lastLoadedTransactions = [];
-      function getSelectedCategoryFilter() {
-        const select = document.getElementById('txCategoryFilter');
-        return select ? (select.value || '') : '';
-      }
-
-      function filterTransactionsByCategory(items) {
-        const all = Array.isArray(items) ? items : [];
-        const category = getSelectedCategoryFilter();
-        if (!category) return all;
-        return all.filter((tx) => (tx && (tx.category || '') === category));
-      }
-
-      function updateCategoryFilterOptions(items) {
-        const select = document.getElementById('txCategoryFilter');
-        if (!select) return;
-
-        const previous = select.value || '';
-        const categories = new Set();
-        if (Array.isArray(items)) {
-          items.forEach((tx) => {
-            if (tx && tx.category) {
-              categories.add(String(tx.category));
-            }
-          });
-        }
-
-        // Rebuild options: first "all", then unique categories from data
-        select.innerHTML = '';
-        const baseOption = document.createElement('option');
-        baseOption.value = '';
-        baseOption.setAttribute('data-i18n', 'tx_category_all');
-        baseOption.textContent = t('tx_category_all');
-        select.appendChild(baseOption);
-
-        categories.forEach((cat) => {
-          const opt = document.createElement('option');
-          opt.value = cat;
-          opt.textContent = cat;
-          select.appendChild(opt);
-        });
-
-        // Try to restore previous selection if still available
-        if (previous && (previous === '' || categories.has(previous))) {
-          select.value = previous;
+  function applyUiLang() {
+    const lang = UI_TEXT[currentUiLang] ? currentUiLang : 'ru';
+    const map = UI_TEXT[lang] || UI_TEXT['ru'];
+    const langLabel = document.querySelector('label[for="uiLangSelect"][data-i18n="ui_lang_label"]');
+    if (langLabel && map.ui_lang_label) {
+      langLabel.textContent = map.ui_lang_label;
+    }
+    Object.keys(map).forEach((key) => {
+      const nodes = document.querySelectorAll('[data-i18n="' + key + '"]');
+      nodes.forEach((el) => {
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+          el.setAttribute('placeholder', map[key]);
         } else {
-          select.value = '';
-        }
-      }
-
-
-      // lastSavedKey хранит fingerprint последнего успешно сохранённого набора транзакций для защиты от дублей.
-      // Он сбрасывается при новом parseText().
-
-      async function parseText() {
-        const userIdInput = document.getElementById('userId');
-        const textInput = document.getElementById('text');
-        const userId = userIdInput ? userIdInput.value : '';
-        const text = textInput ? textInput.value : '';
-        const res = await fetch('/api/finance/parse-text', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, text })
-        });
-        const data = await res.json();
-        lastParse = data;
-        lastSavedKey = null;
-        renderWarningsAndQuestions(data);
-        const btn = document.getElementById('saveParsedBtn');
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = t('btn_save_transactions');
-        }
-        const target = document.getElementById('parseResult');
-        if (target) {
-          target.textContent = JSON.stringify(data, null, 2);
-        }
-      
-
-            }
-
-async function parseVoice() {
-        const userIdInput = document.getElementById('userId');
-        const fileInput = document.getElementById('voiceFile');
-        const userId = userIdInput ? userIdInput.value : '';
-        if (!fileInput || !(fileInput instanceof HTMLInputElement) || !fileInput.files || fileInput.files.length === 0) {
-          alert(t('msg_select_file_first'));
-          return;
-        }
-        const file = fileInput.files[0];
-        const form = new FormData();
-        if (userId) {
-          form.append('userId', userId);
-        }
-        form.append('file', file);
-
-        const res = await fetch('/api/finance/voice', {
-          method: 'POST',
-          body: form
-        });
-        const data = await res.json();
-        lastParse = data;
-        lastSavedKey = null;
-        renderWarningsAndQuestions(data);
-        const btn = document.getElementById('saveParsedBtn');
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = t('btn_save_transactions');
-        }
-        const target = document.getElementById('voiceResult');
-        if (target) {
-          target.textContent = JSON.stringify(data, null, 2);
-        }
-      }
-
-      async function saveParsed() {
-        if (!lastParse || !Array.isArray(lastParse.transactions)) {
-          alert(t('msg_parse_text_first'));
-          return;
-        }
-        const fingerprint = JSON.stringify({ userId: lastParse.userId, tx: lastParse.transactions });
-        if (lastSavedKey === fingerprint) {
-          alert(t('msg_already_saved'));
-          return;
-        }
-        const items = lastParse.transactions.map(t => ({
-          ...t,
-          userId: lastParse.userId
-        }));
-        const res = await fetch('/api/finance/transactions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items })
-        });
-        const data = await res.json();
-        lastSavedKey = fingerprint;
-        const btn = document.getElementById('saveParsedBtn');
-        if (btn) {
-          btn.disabled = true;
-          btn.textContent = t('btn_save_transactions_done');
-        }
-        const target = document.getElementById('transactions');
-        if (target) {
-          target.textContent = JSON.stringify(data, null, 2);
-        }
-
-        // После успешного сохранения подтягиваем список и сводку с учётом текущих фильтров
-        await loadTransactions();
-        await getSummary();
-      }
-
-            async function loadTransactions() {
-        const userIdInput = document.getElementById('userId');
-        const fromInput = document.getElementById('summaryFrom');
-        const toInput = document.getElementById('summaryTo');
-        const userId = userIdInput ? userIdInput.value : '';
-        const from = fromInput ? fromInput.value : '';
-        const to = toInput ? toInput.value : '';
-
-        const params = new URLSearchParams({ userId, page: '1', limit: '50' });
-        if (from) params.append('from', from);
-        if (to) params.append('to', to);
-
-        const res = await fetch('/api/finance/transactions?' + params.toString());
-        const data = await res.json();
-        const target = document.getElementById('transactions');
-        if (target) {
-          target.textContent = JSON.stringify(data, null, 2);
-        }
-
-        const items = Array.isArray(data.items) ? data.items : [];
-        lastLoadedTransactions = items.slice();
-        updateCategoryFilterOptions(items);
-        renderTransactionsTable(items);
-      }
-
-      function renderTransactionsTable(items) {
-        const table = document.getElementById('transactionsTable');
-        const tbody = document.querySelector('#transactionsTable tbody');
-        if (!table || !tbody) return;
-        tbody.innerHTML = '';
-
-        const allItems = Array.isArray(items) ? items.slice() : [];
-        lastLoadedTransactions = allItems;
-
-        const rows = filterTransactionsByCategory(allItems);
-
-        if (!rows || !rows.length) {
-          const row = document.createElement('tr');
-          const cell = document.createElement('td');
-          cell.colSpan = 7;
-          cell.textContent = t('msg_no_transactions');
-          row.appendChild(cell);
-          tbody.appendChild(row);
-          return;
-        }
-
-        rows.forEach(item => {
-          const row = document.createElement('tr');
-          const date = new Date(item.date);
-          const dateStr = isNaN(date.getTime()) ? (item.date || '') : date.toISOString().slice(0, 10);
-          const cells = [
-            dateStr,
-            item.category || '',
-            String(item.amount ?? ''),
-            item.currency || '',
-            item.description || '',
-            item.source || ''
-          ];
-          cells.forEach(value => {
-            const td = document.createElement('td');
-            td.textContent = value;
-            row.appendChild(td);
-          });
-
-          const actionsTd = document.createElement('td');
-          actionsTd.style.whiteSpace = 'nowrap';
-
-          const editBtn = document.createElement('button');
-          editBtn.type = 'button';
-          editBtn.textContent = t('btn_edit');
-          editBtn.onclick = () => editTransaction(item.id);
-
-          const deleteBtn = document.createElement('button');
-          deleteBtn.type = 'button';
-          deleteBtn.textContent = t('btn_delete');
-          deleteBtn.style.marginLeft = '4px';
-          deleteBtn.onclick = () => deleteTransaction(item.id);
-
-          actionsTd.appendChild(editBtn);
-          actionsTd.appendChild(deleteBtn);
-          row.appendChild(actionsTd);
-
-          tbody.appendChild(row);
-        });
-      }
-
-
-      function findTransactionById(id) {
-        return (lastLoadedTransactions || []).find(tx => tx.id === id);
-      }
-
-      async function deleteTransaction(id) {
-        if (!id) return;
-        if (!confirm(t('confirm_delete'))) return;
-        try {
-          await fetch('/api/finance/transactions/' + encodeURIComponent(id), {
-            method: 'DELETE'
-          });
-        } catch (err) {
-          console.error('Failed to delete transaction', err);
-        }
-        await loadTransactions();
-        await getSummary();
-      }
-
-      async function editTransaction(id) {
-        if (!id) return;
-        const tx = findTransactionById(id);
-        if (!tx) return;
-
-        const amountStr = prompt(t('prompt_edit_amount'), String(tx.amount ?? ''));
-        if (amountStr === null) return;
-        const normalized = amountStr.replace(',', '.');
-        const amount = parseFloat(normalized);
-        if (!Number.isFinite(amount) || amount <= 0) {
-          alert(t('msg_invalid_amount'));
-          return;
-        }
-
-        const category = prompt(t('prompt_edit_category'), tx.category || '');
-        if (category === null) return;
-
-        const description = prompt(t('prompt_edit_description'), tx.description || '');
-        if (description === null) return;
-
-        try {
-          const res = await fetch('/api/finance/transactions/' + encodeURIComponent(id), {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              amount,
-              category,
-              description
-            })
-          });
-          if (!res.ok) {
-            const text = await res.text();
-            console.error('Failed to update transaction', text);
-          }
-        } catch (err) {
-          console.error('Failed to update transaction', err);
-        }
-        await loadTransactions();
-        await getSummary();
-      }
-
-      async function getSummary() {
-        const userIdInput = document.getElementById('userId');
-        const fromInput = document.getElementById('summaryFrom');
-        const toInput = document.getElementById('summaryTo');
-        const userId = userIdInput ? userIdInput.value : '';
-        const from = fromInput ? fromInput.value : '';
-        const to = toInput ? toInput.value : '';
-        const params = new URLSearchParams({ userId, from, to, groupBy: 'both' });
-        const res = await fetch('/api/finance/summary?' + params.toString());
-        const data = await res.json();
-        const target = document.getElementById('summary');
-        if (target) {
-          target.textContent = JSON.stringify(data, null, 2);
-        }
-        renderSummaryTables(data);
-      }
-
-      
-      // --- Step 1: Summary -> Transactions drill-down (clickable summary) ---
-      async function drillDownToCategory(categoryId) {
-        const select = document.getElementById('txCategoryFilter');
-        if (select) {
-          select.value = categoryId || '';
-        }
-        await loadTransactions();
-      }
-
-      async function drillDownToDate(dateIso) {
-        const fromInput = document.getElementById('summaryFrom');
-        const toInput = document.getElementById('summaryTo');
-        if (fromInput) fromInput.value = dateIso || '';
-        if (toInput) toInput.value = dateIso || '';
-        const select = document.getElementById('txCategoryFilter');
-        if (select) {
-          // сбрасываем категорию при drill-down по дате
-          select.value = '';
-        }
-        await loadTransactions();
-        await getSummary();
-      }
-
-      function initSummaryDrillDown() {
-        const byCatTable = document.getElementById('summaryByCategory');
-        const byDateTable = document.getElementById('summaryByDate');
-
-        if (byCatTable) {
-          byCatTable.addEventListener('click', (ev) => {
-            const target = ev.target;
-            const tr = target && target.closest ? target.closest('tr[data-category]') : null;
-            if (!tr) return;
-            const cat = tr.dataset.category || '';
-            if (!cat) return;
-            drillDownToCategory(cat);
-          });
-        }
-
-        if (byDateTable) {
-          byDateTable.addEventListener('click', (ev) => {
-            const target = ev.target;
-            const tr = target && target.closest ? target.closest('tr[data-date]') : null;
-            if (!tr) return;
-            const dateIso = tr.dataset.date || '';
-            if (!dateIso) return;
-            drillDownToDate(dateIso);
-          });
-        }
-      }
-
-      function renderSummaryTables(data) {
-        const byCatBody = document.querySelector('#summaryByCategory tbody');
-        const byDateBody = document.querySelector('#summaryByDate tbody');
-
-        if (byCatBody) {
-          byCatBody.innerHTML = '';
-          if (Array.isArray(data.byCategory) && data.byCategory.length) {
-            data.byCategory.forEach(row => {
-              const tr = document.createElement('tr');
-              if (row && row.category) {
-                tr.classList.add('drill-row');
-                tr.dataset.category = String(row.category);
-              }
-              const tdCat = document.createElement('td');
-              tdCat.textContent = row.category || t('msg_no_category');
-              const tdAmount = document.createElement('td');
-              tdAmount.textContent = String(row.amount ?? '');
-              tr.appendChild(tdCat);
-              tr.appendChild(tdAmount);
-              byCatBody.appendChild(tr);
-            });
-          } else {
-            const tr = document.createElement('tr');
-            const td = document.createElement('td');
-            td.colSpan = 2;
-            td.textContent = t('msg_no_data');
-            tr.appendChild(td);
-            byCatBody.appendChild(tr);
-          }
-        }
-
-        if (byDateBody) {
-          byDateBody.innerHTML = '';
-          if (Array.isArray(data.byDate) && data.byDate.length) {
-            data.byDate.forEach(row => {
-              const tr = document.createElement('tr');
-              if (row && row.date) {
-                tr.classList.add('drill-row');
-                tr.dataset.date = String(row.date);
-              }
-              const tdDate = document.createElement('td');
-              tdDate.textContent = row.date || '';
-              const tdAmount = document.createElement('td');
-              tdAmount.textContent = String(row.amount ?? '');
-              tr.appendChild(tdDate);
-              tr.appendChild(tdAmount);
-              byDateBody.appendChild(tr);
-            });
-          } else {
-            const tr = document.createElement('tr');
-            const td = document.createElement('td');
-            td.colSpan = 2;
-            td.textContent = t('msg_no_data');
-            tr.appendChild(td);
-            byDateBody.appendChild(tr);
-          }
-        }
-      }
-
-      async function askAssistant() {
-        const userIdInput = document.getElementById('userId');
-        const msgInput = document.getElementById('assistantMsg');
-        const userId = userIdInput ? userIdInput.value : '';
-        const message = msgInput ? msgInput.value : '';
-        const res = await fetch('/api/finance/assistant', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, message })
-        });
-        const data = await res.json();
-        const target = document.getElementById('assistant');
-        if (target) {
-          target.textContent = JSON.stringify(data, null, 2);
-        }
-        const human = document.getElementById('assistantHuman');
-        if (human) {
-          const answer = data && typeof data.answer === 'string' ? data.answer : '';
-          human.textContent = answer || '';
-        }
-      }
-
-      // --- Quick summary ranges ---
-      function toIsoDate(d) {
-        return d.toISOString().slice(0, 10);
-      }
-
-      function setSummaryRange(rangeKey) {
-        const fromInput = document.getElementById('summaryFrom');
-        const toInput = document.getElementById('summaryTo');
-        if (!fromInput || !toInput) return;
-
-        const today = new Date();
-        let from = new Date(today);
-        let to = new Date(today);
-
-        if (rangeKey === 'week') {
-          const day = today.getDay(); // 0 (Sun) - 6 (Sat)
-          const diffToMonday = (day + 6) % 7;
-          from.setDate(today.getDate() - diffToMonday);
-        } else if (rangeKey === 'month') {
-          from = new Date(today.getFullYear(), today.getMonth(), 1);
-          to = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-        }
-
-        fromInput.value = toIsoDate(from);
-        toInput.value = toIsoDate(to);
-        getSummary();
-      }
-
-      // --- Assistant quick examples ---
-      const EXAMPLE_QUESTIONS = {
-        ru: [
-          'Сколько потратил на еду в этом месяце?',
-          'Сколько всего я потратил сегодня?',
-          'Какая категория трат самая большая за последнюю неделю?'
-        ],
-        uk: [
-          'Скільки я витратив на їжу цього місяця?',
-          'Скільки всього я витратив сьогодні?',
-          'Яка категорія витрат була найбільшою за останній тиждень?'
-        ],
-        en: [
-          'How much did I spend on food this month?',
-          'How much did I spend in total today?',
-          'Which spending category was the biggest in the last week?'
-        ]
-      };
-
-      function renderAssistantExamples() {
-        const container = document.getElementById('assistantExamples');
-        if (!container) return;
-
-        const select = document.getElementById('uiLangSelect');
-        const lang = (select && select.value) || (typeof currentUiLang !== 'undefined' ? currentUiLang : 'ru');
-        const examples = EXAMPLE_QUESTIONS[lang] || EXAMPLE_QUESTIONS.ru;
-
-        container.innerHTML = '';
-
-        const label = document.createElement('div');
-        label.className = 'quick-examples-label muted';
-        label.setAttribute('data-i18n', 'assistant_examples_label');
-        label.textContent = t('assistant_examples_label');
-        container.appendChild(label);
-
-        const wrap = document.createElement('div');
-        wrap.className = 'quick-examples-buttons';
-        examples.forEach((q) => {
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.textContent = q;
-          btn.addEventListener('click', () => {
-            const textarea = document.getElementById('assistantMsg');
-            if (textarea) {
-              textarea.value = q;
-              textarea.focus();
-            }
-          });
-          wrap.appendChild(btn);
-        });
-        container.appendChild(wrap);
-      }
-
-      document.addEventListener('DOMContentLoaded', () => {
-        try {
-          renderAssistantExamples();
-          const select = document.getElementById('uiLangSelect');
-          if (select) {
-            select.addEventListener('change', renderAssistantExamples);
-          }
-        } catch (err) {
-          console.error('Failed to init assistant examples', err);
+          el.textContent = map[key];
         }
       });
+    });
+    renderAssistantExamples();
+    updateTransactionsFilterInfo();
+  }
 
-      // Extend UI_TEXT with labels for quick ranges and examples
-      if (typeof UI_TEXT !== 'undefined') {
-        const ru = UI_TEXT.ru || {};
-        const uk = UI_TEXT.uk || {};
-        const en = UI_TEXT.en || {};
+  const langSelect = document.getElementById('uiLangSelect');
+  if (langSelect) {
+    langSelect.addEventListener('change', (e) => {
+      currentUiLang = e.target.value;
+      applyUiLang();
+    });
+  }
 
-        ru.summary_quick = ru.summary_quick || 'Быстрые периоды:';
-        ru.summary_today = ru.summary_today || 'Сегодня';
-        ru.summary_week = ru.summary_week || 'Эта неделя';
-        ru.summary_month = ru.summary_month || 'Этот месяц';
-        ru.assistant_examples_label = ru.assistant_examples_label || 'Примеры вопросов:';
+  function setAccessToken(token) {
+    accessToken = token || '';
+    if (accessToken) {
+      localStorage.setItem('demoAccessToken', accessToken);
+    } else {
+      localStorage.removeItem('demoAccessToken');
+    }
+  }
 
-        uk.summary_quick = uk.summary_quick || 'Швидкі періоди:';
-        uk.summary_today = uk.summary_today || 'Сьогодні';
-        uk.summary_week = uk.summary_week || 'Цей тиждень';
-        uk.summary_month = uk.summary_month || 'Цей місяць';
-        uk.assistant_examples_label = uk.assistant_examples_label || 'Приклади запитань:';
-
-        en.summary_quick = en.summary_quick || 'Quick ranges:';
-        en.summary_today = en.summary_today || 'Today';
-        en.summary_week = en.summary_week || 'This week';
-        en.summary_month = en.summary_month || 'This month';
-        en.assistant_examples_label = en.assistant_examples_label || 'Example questions:';
+  function updateAuthUi() {
+    const userLabel = document.getElementById('currentUser');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const loginBtn = document.getElementById('loginBtn');
+    if (userLabel) {
+      if (currentUser) {
+        userLabel.textContent = `${t('label_current_user')} ${currentUser.email || currentUser.id}`;
+      } else {
+        userLabel.textContent = `${t('label_current_user')} ${t('label_not_logged_in')}`;
       }
+    }
+    if (logoutBtn) logoutBtn.disabled = !currentUser;
+    if (loginBtn) loginBtn.disabled = false;
+  }
+
+  async function apiFetch(path, options = {}, retry = true) {
+    const headers = new Headers(options.headers || {});
+    if (!(options.body instanceof FormData) && !headers.has('Content-Type') && options.body) {
+      headers.set('Content-Type', 'application/json');
+    }
+    if (accessToken) {
+      headers.set('Authorization', `Bearer ${accessToken}`);
+    }
+    const res = await fetch(path, { ...options, headers, credentials: 'include' });
+    if (res.status === 401 && retry) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        return apiFetch(path, options, false);
+      }
+    }
+    return res;
+  }
+
+  async function refreshAccessToken() {
+    try {
+      const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (data.accessToken) {
+        setAccessToken(data.accessToken);
+        currentUser = data.user || null;
+        updateAuthUi();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function login() {
+    const emailInput = document.getElementById('emailInput');
+    const email = emailInput && emailInput.value ? emailInput.value.trim() : '';
+    const res = await fetch('/api/auth/demo-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+      credentials: 'include'
+    });
+    if (!res.ok) {
+      alert('Login failed');
+      return;
+    }
+    const data = await res.json();
+    setAccessToken(data.accessToken || '');
+    currentUser = data.user || null;
+    updateAuthUi();
+    await loadTransactions();
+    await getSummary();
+  }
+
+  async function logout() {
+    await apiFetch('/api/auth/logout', { method: 'POST' }, false);
+    currentUser = null;
+    setAccessToken('');
+    updateAuthUi();
+    document.getElementById('transactions').textContent = '';
+    document.getElementById('summary').textContent = '';
+    document.getElementById('transactionsTable').querySelector('tbody').innerHTML = '';
+  }
+
+  function ensureLoggedIn() {
+    if (!accessToken) {
+      alert(t('msg_login_required'));
+      return false;
+    }
+    return true;
+  }
+
+  function renderWarningsAndQuestions(data) {
+    const warningsBlock = document.getElementById('parseWarningsBlock');
+    const warningsList = document.getElementById('parseWarningsList');
+    const questionsBlock = document.getElementById('parseQuestionsBlock');
+    const questionsList = document.getElementById('parseQuestionsList');
+    const warnings = Array.isArray(data?.warnings) ? data.warnings : [];
+    const questions = Array.isArray(data?.questions) ? data.questions : [];
+
+    if (warningsBlock && warningsList) {
+      warningsBlock.style.display = warnings.length ? 'block' : 'none';
+      warningsList.innerHTML = warnings.map((w) => `<li>${w}</li>`).join('');
+    }
+    if (questionsBlock && questionsList) {
+      questionsBlock.style.display = questions.length ? 'block' : 'none';
+      questionsList.innerHTML = questions.map((q) => `<li>${q}</li>`).join('');
+    }
+  }
+
+  async function parseText() {
+    if (!ensureLoggedIn()) return;
+    const textInput = document.getElementById('text');
+    const text = textInput ? textInput.value : '';
+    const res = await apiFetch('/api/finance/parse-text', {
+      method: 'POST',
+      body: JSON.stringify({ text })
+    });
+    const data = await res.json();
+    lastParse = data;
+    lastSavedKey = null;
+    renderWarningsAndQuestions(data);
+    const btn = document.getElementById('saveParsedBtn');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = t('btn_save_transactions');
+    }
+    const target = document.getElementById('parseResult');
+    if (target) {
+      target.textContent = JSON.stringify(data, null, 2);
+    }
+  }
+
+  async function parseVoice() {
+    if (!ensureLoggedIn()) return;
+    const fileInput = document.getElementById('voiceFile');
+    if (!fileInput || !(fileInput instanceof HTMLInputElement) || !fileInput.files || fileInput.files.length === 0) {
+      alert(t('msg_select_file_first'));
+      return;
+    }
+    const file = fileInput.files[0];
+    const form = new FormData();
+    form.append('file', file);
+    const res = await apiFetch('/api/finance/voice', {
+      method: 'POST',
+      body: form,
+      headers: {}
+    });
+    const data = await res.json();
+    lastParse = data;
+    lastSavedKey = null;
+    renderWarningsAndQuestions(data);
+    const btn = document.getElementById('saveParsedBtn');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = t('btn_save_transactions');
+    }
+    const target = document.getElementById('voiceResult');
+    if (target) {
+      target.textContent = JSON.stringify(data, null, 2);
+    }
+  }
+
+  function updateTransactionsFilterInfo() {
+    const info = document.getElementById('txFiltersInfo');
+    if (!info) return;
+    const parts = [];
+    if (activeTxFilters.category) parts.push(`${t('filter_category')}: ${activeTxFilters.category}`);
+    if (activeTxFilters.from) parts.push(`${t('filter_from')}: ${activeTxFilters.from}`);
+    if (activeTxFilters.to) parts.push(`${t('filter_to')}: ${activeTxFilters.to}`);
+    info.textContent = `${t('label_active_filters')} ${parts.length ? parts.join(', ') : t('filters_none')}`;
+  }
+
+  async function saveParsed() {
+    if (!ensureLoggedIn()) return;
+    if (!lastParse || !Array.isArray(lastParse.transactions)) {
+      alert(t('msg_parse_text_first'));
+      return;
+    }
+    const fingerprint = JSON.stringify({ tx: lastParse.transactions });
+    if (lastSavedKey === fingerprint) {
+      alert(t('msg_already_saved'));
+      return;
+    }
+    const items = lastParse.transactions.map((t) => ({ ...t }));
+    const res = await apiFetch('/api/finance/transactions', {
+      method: 'POST',
+      body: JSON.stringify({ items })
+    });
+    const data = await res.json();
+    lastSavedKey = fingerprint;
+    const btn = document.getElementById('saveParsedBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = t('btn_save_transactions_done');
+    }
+    const target = document.getElementById('transactions');
+    if (target) {
+      target.textContent = JSON.stringify(data, null, 2);
+    }
+    await loadTransactions();
+    await getSummary();
+  }
+
+  function updateCategoryFilterOptions(items) {
+    const select = document.getElementById('txCategoryFilter');
+    if (!select) return;
+    const previous = select.value || '';
+    const categories = new Set();
+    if (Array.isArray(items)) {
+      items.forEach((tx) => {
+        if (tx && tx.category) categories.add(String(tx.category));
+      });
+    }
+    select.innerHTML = '';
+    const baseOption = document.createElement('option');
+    baseOption.value = '';
+    baseOption.setAttribute('data-i18n', 'tx_category_all');
+    baseOption.textContent = t('tx_category_all');
+    select.appendChild(baseOption);
+    categories.forEach((cat) => {
+      const opt = document.createElement('option');
+      opt.value = cat;
+      opt.textContent = cat;
+      select.appendChild(opt);
+    });
+    if (previous && (previous === '' || categories.has(previous))) {
+      select.value = previous;
+    } else {
+      select.value = '';
+    }
+  }
+
+  function applyCategoryFilterFromSelect() {
+    const select = document.getElementById('txCategoryFilter');
+    activeTxFilters.category = select ? (select.value || '') : '';
+    updateTransactionsFilterInfo();
+  }
+
+  const categorySelect = document.getElementById('txCategoryFilter');
+  if (categorySelect) {
+    categorySelect.addEventListener('change', () => {
+      applyCategoryFilterFromSelect();
+      loadTransactions();
+    });
+  }
+
+  async function loadTransactions() {
+    if (!ensureLoggedIn()) return;
+    const limitInput = document.getElementById('txLimit');
+    const limit = limitInput && limitInput.value ? Number(limitInput.value) : 50;
+    activeTxFilters.limit = Number.isFinite(limit) ? Math.max(1, Math.min(limit, 200)) : 50;
+    applyCategoryFilterFromSelect();
+
+    const params = new URLSearchParams({
+      page: String(activeTxFilters.page || 1),
+      limit: String(activeTxFilters.limit)
+    });
+    if (activeTxFilters.from) params.append('from', activeTxFilters.from);
+    if (activeTxFilters.to) params.append('to', activeTxFilters.to);
+    if (activeTxFilters.category) params.append('category', activeTxFilters.category);
+
+    const res = await apiFetch('/api/finance/transactions?' + params.toString());
+    const data = await res.json();
+    const target = document.getElementById('transactions');
+    if (target) {
+      target.textContent = JSON.stringify(data, null, 2);
+    }
+
+    const items = Array.isArray(data.items) ? data.items : [];
+    lastLoadedTransactions = items.slice();
+    updateCategoryFilterOptions(items);
+    renderTransactionsTable(items);
+    updateTransactionsFilterInfo();
+  }
+
+  function renderTransactionsTable(items) {
+    const table = document.getElementById('transactionsTable');
+    const tbody = document.querySelector('#transactionsTable tbody');
+    if (!table || !tbody) return;
+    tbody.innerHTML = '';
+    const rows = Array.isArray(items) ? items : [];
+
+    if (!rows.length) {
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 7;
+      cell.textContent = t('msg_no_transactions');
+      row.appendChild(cell);
+      tbody.appendChild(row);
+      return;
+    }
+
+    rows.forEach((item) => {
+      const row = document.createElement('tr');
+      const date = new Date(item.date);
+      const dateStr = isNaN(date.getTime()) ? (item.date || '') : date.toISOString().slice(0, 10);
+      const cells = [dateStr, item.category || '', String(item.amount ?? ''), item.currency || '', item.description || '', item.source || ''];
+      cells.forEach((value) => {
+        const td = document.createElement('td');
+        td.textContent = value;
+        row.appendChild(td);
+      });
+
+      const actionsTd = document.createElement('td');
+      actionsTd.style.whiteSpace = 'nowrap';
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.textContent = t('btn_edit');
+      editBtn.onclick = () => editTransaction(item.id);
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.textContent = t('btn_delete');
+      deleteBtn.style.marginLeft = '4px';
+      deleteBtn.onclick = () => deleteTransaction(item.id);
+      actionsTd.appendChild(editBtn);
+      actionsTd.appendChild(deleteBtn);
+      row.appendChild(actionsTd);
+      tbody.appendChild(row);
+    });
+  }
+
+  function findTransactionById(id) {
+    return (lastLoadedTransactions || []).find((tx) => tx.id === id);
+  }
+
+  async function deleteTransaction(id) {
+    if (!ensureLoggedIn()) return;
+    if (!id) return;
+    if (!confirm(t('confirm_delete'))) return;
+    try {
+      const res = await apiFetch('/api/finance/transactions/' + encodeURIComponent(id), { method: 'DELETE' });
+      if (res.status === 204) {
+        await loadTransactions();
+        await getSummary();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function editTransaction(id) {
+    if (!ensureLoggedIn()) return;
+    const tx = findTransactionById(id);
+    if (!tx) return;
+    const newAmountStr = prompt(t('prompt_edit_amount'), tx.amount);
+    if (newAmountStr === null) return;
+    const newAmount = Number(newAmountStr);
+    if (!Number.isFinite(newAmount) || newAmount <= 0) {
+      alert(t('msg_invalid_amount'));
+      return;
+    }
+    const newCategory = prompt(t('prompt_edit_category'), tx.category || '') || tx.category;
+    const newDescription = prompt(t('prompt_edit_description'), tx.description || '') || tx.description;
+
+    const res = await apiFetch('/api/finance/transactions/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      body: JSON.stringify({ amount: newAmount, category: newCategory, description: newDescription })
+    });
+    const data = await res.json();
+    if (data?.item) {
+      await loadTransactions();
+      await getSummary();
+    }
+  }
+
+  async function getSummary() {
+    if (!ensureLoggedIn()) return;
+    const fromInput = document.getElementById('summaryFrom');
+    const toInput = document.getElementById('summaryTo');
+    const from = fromInput ? fromInput.value : '';
+    const to = toInput ? toInput.value : '';
+    if (!from || !to) {
+      alert('from/to are required');
+      return;
+    }
+    const params = new URLSearchParams({ from, to, groupBy: 'both' });
+    const res = await apiFetch('/api/finance/summary?' + params.toString());
+    const data = await res.json();
+    const target = document.getElementById('summary');
+    if (target) {
+      target.textContent = JSON.stringify(data, null, 2);
+    }
+    renderSummaryTables(data);
+    activeTxFilters.from = from;
+    activeTxFilters.to = to;
+    updateTransactionsFilterInfo();
+  }
+
+  function renderSummaryTables(data) {
+    const byCatBody = document.querySelector('#summaryByCategory tbody');
+    const byDateBody = document.querySelector('#summaryByDate tbody');
+    if (byCatBody) {
+      byCatBody.innerHTML = '';
+      if (Array.isArray(data.byCategory) && data.byCategory.length) {
+        data.byCategory.forEach((row) => {
+          const tr = document.createElement('tr');
+          tr.classList.add('drill-row');
+          tr.dataset.category = String(row.category);
+          const tdCat = document.createElement('td');
+          tdCat.textContent = row.category || t('msg_no_category');
+          const tdAmount = document.createElement('td');
+          tdAmount.textContent = String(row.amount ?? '');
+          tr.appendChild(tdCat);
+          tr.appendChild(tdAmount);
+          tr.addEventListener('click', () => {
+            const select = document.getElementById('txCategoryFilter');
+            if (select) {
+              select.value = row.category || '';
+            }
+            activeTxFilters.category = row.category || '';
+            updateTransactionsFilterInfo();
+            loadTransactions();
+          });
+          byCatBody.appendChild(tr);
+        });
+      } else {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 2;
+        td.textContent = t('msg_no_data');
+        tr.appendChild(td);
+        byCatBody.appendChild(tr);
+      }
+    }
+
+    if (byDateBody) {
+      byDateBody.innerHTML = '';
+      if (Array.isArray(data.byDate) && data.byDate.length) {
+        data.byDate.forEach((row) => {
+          const tr = document.createElement('tr');
+          tr.classList.add('drill-row');
+          tr.dataset.date = String(row.date);
+          const tdDate = document.createElement('td');
+          tdDate.textContent = row.date || '';
+          const tdAmount = document.createElement('td');
+          tdAmount.textContent = String(row.amount ?? '');
+          tr.appendChild(tdDate);
+          tr.appendChild(tdAmount);
+          tr.addEventListener('click', () => {
+            activeTxFilters.from = row.date;
+            activeTxFilters.to = row.date;
+            const select = document.getElementById('txCategoryFilter');
+            if (select) {
+              select.value = '';
+            }
+            activeTxFilters.category = '';
+            loadTransactions();
+          });
+          byDateBody.appendChild(tr);
+        });
+      } else {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 2;
+        td.textContent = t('msg_no_data');
+        tr.appendChild(td);
+        byDateBody.appendChild(tr);
+      }
+    }
+  }
+
+  async function askAssistant() {
+    if (!ensureLoggedIn()) return;
+    const msgInput = document.getElementById('assistantMsg');
+    const message = msgInput ? msgInput.value : '';
+    const res = await apiFetch('/api/finance/assistant', {
+      method: 'POST',
+      body: JSON.stringify({ message })
+    });
+    const data = await res.json();
+    const target = document.getElementById('assistant');
+    if (target) {
+      target.textContent = JSON.stringify(data, null, 2);
+    }
+    const human = document.getElementById('assistantHuman');
+    if (human) {
+      const answer = data && typeof data.answer === 'string' ? data.answer : '';
+      human.textContent = answer || '';
+    }
+  }
+
+  function toIsoDate(d) {
+    return d.toISOString().slice(0, 10);
+  }
+
+  function setSummaryRange(rangeKey) {
+    const fromInput = document.getElementById('summaryFrom');
+    const toInput = document.getElementById('summaryTo');
+    if (!fromInput || !toInput) return;
+    const today = new Date();
+    let from = new Date(today);
+    let to = new Date(today);
+    if (rangeKey === 'week') {
+      const day = today.getDay();
+      const diffToMonday = (day + 6) % 7;
+      from.setDate(today.getDate() - diffToMonday);
+    } else if (rangeKey === 'month') {
+      from = new Date(today.getFullYear(), today.getMonth(), 1);
+      to = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    }
+    fromInput.value = toIsoDate(from);
+    toInput.value = toIsoDate(to);
+    activeTxFilters.from = fromInput.value;
+    activeTxFilters.to = toInput.value;
+    getSummary();
+  }
+
+  const EXAMPLE_QUESTIONS = {
+    ru: [
+      'Сколько потратил на еду в этом месяце?',
+      'Сколько всего я потратил сегодня?',
+      'Какая категория трат самая большая за последнюю неделю?'
+    ],
+    uk: [
+      'Скільки я витратив на їжу цього місяця?',
+      'Скільки всього я витратив сьогодні?',
+      'Яка категорія витрат була найбільшою за останній тиждень?'
+    ],
+    en: [
+      'How much did I spend on food this month?',
+      'How much did I spend in total today?',
+      'Which spending category was the biggest in the last week?'
+    ]
+  };
+
+  function renderAssistantExamples() {
+    const container = document.getElementById('assistantExamples');
+    if (!container) return;
+    const select = document.getElementById('uiLangSelect');
+    const lang = (select && select.value) || currentUiLang || 'ru';
+    const examples = EXAMPLE_QUESTIONS[lang] || EXAMPLE_QUESTIONS.ru;
+    container.innerHTML = '';
+    const label = document.createElement('div');
+    label.className = 'quick-examples-label';
+    label.textContent = 'Примеры:';
+    container.appendChild(label);
+    const buttons = document.createElement('div');
+    buttons.className = 'quick-examples-buttons';
+    examples.forEach((ex) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = ex;
+      btn.onclick = () => {
+        const msgInput = document.getElementById('assistantMsg');
+        if (msgInput) msgInput.value = ex;
+      };
+      buttons.appendChild(btn);
+    });
+    container.appendChild(buttons);
+  }
+
+  async function bootstrap() {
+    applyUiLang();
+    renderAssistantExamples();
+    if (accessToken) {
+      await refreshAccessToken();
+    }
+    updateAuthUi();
+  }
+
+  bootstrap();
 </script>
 </body>
 </html>
