@@ -10,10 +10,50 @@
   - `/api/health` — проверка статуса;
   - `/api/auth/demo-login`, `/api/auth/refresh`, `/api/auth/logout`;
   - `/api/finance/parse-text`, `/api/finance/voice`, `/api/finance/assistant`;
-  - `/api/finance/transactions` (CRUD);
-  - `/api/finance/summary` (агрегация по датам/категориям);
-  - `/api/finance/meta/categories?lang=ru|uk|en` (локализованные категории из `src/lib/categories.ts`).
-  - `/api/finance/transactions/export?from=YYYY-MM-DD&to=YYYY-MM-DD&category=&lang=` — CSV-экспорт транзакций текущего пользователя (требует Authorization: Bearer). Ограничение: до 20 000 строк на выгрузку.
+- `/api/finance/transactions` (CRUD);
+- `/api/finance/summary` (агрегация по датам/категориям);
+- `/api/finance/meta/categories?lang=ru|uk|en` (локализованные категории из `src/lib/categories.ts`).
+- `/api/finance/transactions/export?from=YYYY-MM-DD&to=YYYY-MM-DD&category=&lang=` — CSV-экспорт транзакций текущего пользователя (требует Authorization: Bearer). Ограничение: до 20 000 строк на выгрузку.
+
+## Data model
+
+`FinanceTransaction` хранит как расходы, так и доходы (enum `TransactionType`):
+
+- `type`: `expense` (по умолчанию) или `income`;
+- `date`: дата операции;
+- `amount`: число (>0);
+- `currency`: строка, по умолчанию `UAH`;
+- `category`: строковый идентификатор категории;
+- `description`: описание операции;
+- `source`: `manual`/`voice`/`import` и др.
+
+Примеры ответов API:
+
+- `/api/finance/summary?from=2025-12-01&to=2025-12-31&type=all&groupBy=both` →
+
+  ```json
+  {
+    "period": { "from": "2025-12-01", "to": "2025-12-31" },
+    "incomeTotal": 50000,
+    "expenseTotal": 32000,
+    "balance": 18000,
+    "byCategory": [
+      { "category": "food", "amount": 12000 },
+      { "category": "salary", "amount": 50000 }
+    ],
+    "byDate": [
+      { "date": "2025-12-10", "amount": 4500 },
+      { "date": "2025-12-11", "amount": 8000 }
+    ]
+  }
+  ```
+
+- `/api/finance/transactions/export?from=2025-12-01&to=2025-12-31&type=income` → CSV со строками вида:
+
+  ```csv
+  "date","type","categoryId","categoryLabel","amount","currency","description","source"
+  "2025-12-05","income","salary","Зарплата","50000","UAH","оклад","manual"
+  ```
 
 ## Быстрый старт
 

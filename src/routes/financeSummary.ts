@@ -12,9 +12,16 @@ const parseDate = (value?: string): Date | undefined => {
   return isNaN(date.getTime()) ? undefined : date;
 };
 
+const parseTypeFilter = (value: string | undefined): "income" | "expense" | "all" => {
+  if (value === "income" || value === "expense" || value === "all") {
+    return value;
+  }
+  return "all";
+};
+
 financeSummaryRouter.get("/", async (req, res, next) => {
   try {
-    const { from, to, groupBy } = req.query;
+    const { from, to, groupBy, type } = req.query;
 
     const fromDate = typeof from === "string" ? parseDate(from) : undefined;
     const toDate = typeof to === "string" ? parseDate(to) : undefined;
@@ -30,7 +37,8 @@ financeSummaryRouter.get("/", async (req, res, next) => {
       userId: req.user!.id,
       from: fromDate,
       to: toDate,
-      groupBy: groupByValue
+      groupBy: groupByValue,
+      type: parseTypeFilter(typeof type === "string" ? type : undefined)
     });
 
     res.json(summary);

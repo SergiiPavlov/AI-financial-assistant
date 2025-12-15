@@ -1,5 +1,5 @@
 import { Decimal } from "@prisma/client/runtime/library";
-import { Prisma } from "@prisma/client";
+import { Prisma, TransactionType } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 
 export type TransactionFilter = {
@@ -7,6 +7,7 @@ export type TransactionFilter = {
   from?: Date;
   to?: Date;
   category?: string;
+  type?: TransactionType;
   page?: number;
   limit?: number;
 };
@@ -16,6 +17,7 @@ export type TransactionExportFilter = {
   from: Date;
   to: Date;
   category?: string;
+  type?: TransactionType;
   maxRows?: number;
 };
 
@@ -28,6 +30,7 @@ export type TransactionForExport = {
   category: string;
   description: string;
   source: string;
+  type: TransactionType;
 };
 
 export type TransactionInput = {
@@ -38,6 +41,7 @@ export type TransactionInput = {
   category: string;
   description: string;
   source?: string;
+  type?: TransactionType;
 };
 
 export type TransactionUpdateInput = {
@@ -46,6 +50,7 @@ export type TransactionUpdateInput = {
   currency?: string;
   category?: string;
   description?: string;
+  type?: TransactionType;
 };
 
 export type GroupByOption = "category" | "date" | "both";
@@ -54,6 +59,7 @@ export type SummaryRequest = {
   userId: string;
   from: Date;
   to: Date;
+  type?: TransactionType | "all";
   groupBy?: GroupByOption;
 };
 
@@ -61,6 +67,10 @@ const parseDate = (value?: string): Date | undefined => {
   if (!value) return undefined;
   const date = new Date(value);
   return isNaN(date.getTime()) ? undefined : date;
+};
+
+const isTransactionTypeValue = (value: any): value is TransactionType => {
+  return value === "expense" || value === "income";
 };
 
 const toNumber = (value: Decimal | Prisma.Decimal): number => {
@@ -78,6 +88,7 @@ export const listTransactions = async (filter: TransactionFilter) => {
   const where: Prisma.FinanceTransactionWhereInput = {
     userId: filter.userId,
     ...(filter.category ? { category: filter.category } : {}),
+    ...(filter.type ? { type: filter.type } : {}),
     ...(filter.from || filter.to
       ? {
           date: {
@@ -115,6 +126,7 @@ export const getTransactionsForExport = async (filter: TransactionExportFilter) 
   const where: Prisma.FinanceTransactionWhereInput = {
     userId: filter.userId,
     ...(filter.category ? { category: filter.category } : {}),
+    ...(filter.type ? { type: filter.type } : {}),
     date: {
       gte: filter.from,
       lte: filter.to
@@ -151,7 +163,8 @@ export const createTransactions = async (inputs: TransactionInput[]) => {
           currency: data.currency || "UAH",
           category: data.category,
           description: data.description,
-          source: data.source || "manual"
+          source: data.source || "manual",
+          type: data.type || "expense"
         }
       })
     )
@@ -203,6 +216,12 @@ const validateTransactionUpdateInput = (input: TransactionUpdateInput) => {
     }
     data.description = input.description.trim();
   }
+  if (input.type !== undefined) {
+    if (!isTransactionTypeValue(input.type)) {
+      throw new Error("type must be either expense or income");
+    }
+    data.type = input.type;
+  }
   return data;
 };
 
@@ -230,7 +249,7 @@ export const updateTransaction = async (id: string, userId: string, input: Trans
 export const getSummary = async (params: SummaryRequest) => {
   const from = params.from;
   const to = params.to;
-  const where: Prisma.FinanceTransactionWhereInput = {
+  const baseWhere: Prisma.FinanceTransactionWhereInput = {
     userId: params.userId,
     date: {
       gte: from,
@@ -238,37 +257,57 @@ export const getSummary = async (params: SummaryRequest) => {
     }
   };
 
-  const totalPromise = prisma.financeTransaction.aggregate({
-    where,
-    _sum: { amount: true }
-  });
+  const filteredWhere: Prisma.FinanceTransactionWhereInput = {
+    ...baseWhere,
+    ...(params.type && params.type !== "all" ? { type: params.type } : {})
+  };
+
+  const incomeTotalPromise =
+    params.type === "expense"
+      ? Promise.resolve({ _sum: { amount: new Prisma.Decimal(0) } })
+      : prisma.financeTransaction.aggregate({
+          where: { ...baseWhere, type: "income" },
+          _sum: { amount: true }
+        });
+
+  const expenseTotalPromise =
+    params.type === "income"
+      ? Promise.resolve({ _sum: { amount: new Prisma.Decimal(0) } })
+      : prisma.financeTransaction.aggregate({
+          where: { ...baseWhere, type: "expense" },
+          _sum: { amount: true }
+        });
 
   const groupByCategoryPromise = prisma.financeTransaction.groupBy({
-    where,
+    where: filteredWhere,
     by: ["category"],
     _sum: { amount: true }
   });
 
   const groupByDatePromise = prisma.financeTransaction.groupBy({
-    where,
+    where: filteredWhere,
     by: ["date"],
     _sum: { amount: true }
   });
 
-  const [totalResult, byCategory, byDate] = await Promise.all([
-    totalPromise,
-    params.groupBy === "date"
-      ? Promise.resolve([])
-      : groupByCategoryPromise,
+  const [incomeTotalResult, expenseTotalResult, byCategory, byDate] = await Promise.all([
+    incomeTotalPromise,
+    expenseTotalPromise,
+    params.groupBy === "date" ? Promise.resolve([]) : groupByCategoryPromise,
     params.groupBy === "category" ? Promise.resolve([]) : groupByDatePromise
   ]);
+
+  const incomeTotal = toNumber(incomeTotalResult._sum.amount || new Prisma.Decimal(0));
+  const expenseTotal = toNumber(expenseTotalResult._sum.amount || new Prisma.Decimal(0));
 
   return {
     period: {
       from: from.toISOString().split("T")[0],
       to: to.toISOString().split("T")[0]
     },
-    total: toNumber(totalResult._sum.amount || new Prisma.Decimal(0)),
+    incomeTotal,
+    expenseTotal,
+    balance: incomeTotal - expenseTotal,
     byCategory:
       params.groupBy === "date"
         ? []

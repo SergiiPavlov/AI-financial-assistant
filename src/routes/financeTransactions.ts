@@ -8,6 +8,7 @@ import {
   TransactionForExport,
   TransactionInput
 } from "../services/financeService";
+import { TransactionType } from "@prisma/client";
 import { requireAuth } from "../lib/auth";
 import { config } from "../config/env";
 import { getCategoryLabel, Lang } from "../lib/categories";
@@ -31,6 +32,11 @@ const parseNumber = (value: string | undefined): number | undefined => {
   if (value === undefined) return undefined;
   const num = Number(value);
   return Number.isFinite(num) ? num : undefined;
+};
+
+const parseTransactionType = (value: any): TransactionType | undefined => {
+  if (value === "income" || value === "expense") return value;
+  return undefined;
 };
 
 const validateTransactionInput = (payload: any, userId: string): TransactionInput => {
@@ -65,6 +71,11 @@ const validateTransactionInput = (payload: any, userId: string): TransactionInpu
     throw new Error(errors.join(", "));
   }
 
+  const type = parseTransactionType(payload.type);
+  if (payload.type !== undefined && !type) {
+    errors.push("type must be either expense or income");
+  }
+
   return {
     userId,
     date: dateValue!,
@@ -75,7 +86,8 @@ const validateTransactionInput = (payload: any, userId: string): TransactionInpu
     source:
       typeof payload.source === "string" && payload.source.trim().length > 0
         ? payload.source
-        : "manual"
+        : "manual",
+    type: type || "expense"
   };
 };
 
@@ -102,7 +114,7 @@ const buildCsv = (items: TransactionForExport[], lang: Lang): string => {
     const dateStr = item.date.toISOString().split("T")[0];
     const row = [
       dateStr,
-      "expense",
+      item.type,
       item.category,
       getCategoryLabel(item.category, lang),
       String(item.amount),
@@ -118,9 +130,14 @@ const buildCsv = (items: TransactionForExport[], lang: Lang): string => {
 
 financeTransactionsRouter.get("/", async (req, res, next) => {
   try {
-    const { from, to, category, page, limit } = req.query;
+    const { from, to, category, page, limit, type } = req.query;
     const fromDate = typeof from === "string" ? parseDate(from) : undefined;
     const toDate = typeof to === "string" ? parseDate(to) : undefined;
+
+    const typeFilter = typeof type === "string" ? parseTransactionType(type) : undefined;
+    if (type && !typeFilter) {
+      return res.status(400).json({ error: "Invalid type. Must be expense or income" });
+    }
 
     const pageNum = typeof page === "string" ? parseNumber(page) : undefined;
     const limitNum = typeof limit === "string" ? parseNumber(limit) : undefined;
@@ -130,6 +147,7 @@ financeTransactionsRouter.get("/", async (req, res, next) => {
       from: fromDate,
       to: toDate,
       category: typeof category === "string" ? category : undefined,
+      type: typeFilter,
       page: pageNum,
       limit: limitNum
     });
@@ -142,7 +160,7 @@ financeTransactionsRouter.get("/", async (req, res, next) => {
 
 financeTransactionsRouter.get("/export", async (req, res, next) => {
   try {
-    const { from, to, category, lang } = req.query;
+    const { from, to, category, lang, type } = req.query;
     if (typeof from !== "string" || typeof to !== "string") {
       return res.status(400).json({ error: "from and to are required" });
     }
@@ -156,12 +174,17 @@ financeTransactionsRouter.get("/export", async (req, res, next) => {
     const selectedLang: Lang = typeof lang === "string" && isSupportedLang(lang) ? lang : "ru";
     const categoryFilter =
       typeof category === "string" && category.trim() ? category.trim() : undefined;
+    const typeFilter = typeof type === "string" ? parseTransactionType(type) : undefined;
+    if (type && !typeFilter) {
+      return res.status(400).json({ error: "Invalid type. Must be expense or income" });
+    }
 
     const { items, exceedsLimit } = await getTransactionsForExport({
       userId: req.user!.id,
       from: fromDate,
       to: toDate,
       category: categoryFilter,
+      type: typeFilter,
       maxRows: MAX_EXPORT_ROWS
     });
 
