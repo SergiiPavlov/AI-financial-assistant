@@ -77,6 +77,12 @@
       <select id="txCategoryFilter">
         <option value="" data-i18n="tx_category_all">Все категории</option>
       </select>
+      <label for="txTypeFilter" data-i18n="label_tx_type">Тип транзакции</label>
+      <select id="txTypeFilter">
+        <option value="all" data-i18n="tx_type_all">Все</option>
+        <option value="expense" data-i18n="tx_type_expense">Расходы</option>
+        <option value="income" data-i18n="tx_type_income">Доходы</option>
+      </select>
       <label for="txLimit" data-i18n="label_limit">Лимит</label>
       <input id="txLimit" type="number" value="50" min="1" max="200" style="width:90px" />
     </div>
@@ -92,6 +98,7 @@
         <tr>
           <th data-i18n="col_date">Дата</th>
           <th data-i18n="col_category">Категория</th>
+          <th data-i18n="col_type">Тип</th>
           <th data-i18n="col_amount">Сумма</th>
           <th data-i18n="col_currency">Валюта</th>
           <th data-i18n="col_description">Описание</th>
@@ -116,6 +123,7 @@
       <button type="button" onclick="setSummaryRange('month')" data-i18n="summary_month">Этот месяц</button>
     </div>
     <button data-i18n="btn_get_summary" onclick="getSummary()">Получить summary</button>
+    <div id="summaryTotals" class="inline" style="gap: 12px; font-weight: 600;"></div>
     <pre id="summary"></pre>
     <div class="muted" data-i18n="summary_hint">Сводка по категориям и датам:</div>
     <div class="muted" data-i18n="summary_drill_hint">Можно кликать по категориям и датам, чтобы фильтровать таблицу.</div>
@@ -161,7 +169,7 @@
   let lastSummaryData = null;
   let categoriesMeta = [];
   let categoryLabelById = {};
-  const activeTxFilters = { from: '', to: '', category: '', page: 1, limit: 50 };
+  const activeTxFilters = { from: '', to: '', category: '', type: 'all', page: 1, limit: 50 };
 
   const UI_TEXT = {
     ru: {
@@ -182,8 +190,12 @@
       label_to: 'To',
       label_assistant_msg: 'Сообщение',
       label_tx_category: 'Фильтр по категории',
+      label_tx_type: 'Тип транзакции',
       label_limit: 'Лимит',
       tx_category_all: 'Все категории',
+      tx_type_all: 'Все',
+      tx_type_expense: 'Расходы',
+      tx_type_income: 'Доходы',
       btn_login: 'Login',
       btn_logout: 'Logout',
       btn_send_parse_text: 'Отправить /parse-text',
@@ -196,8 +208,12 @@
       btn_ask_assistant: 'Спросить',
       summary_hint: 'Сводка по категориям и датам:',
       summary_drill_hint: 'Можно кликать по категориям и датам, чтобы фильтровать таблицу транзакций.',
+      summary_income: 'Доходы',
+      summary_expense: 'Расходы',
+      summary_balance: 'Баланс',
       col_date: 'Дата',
       col_category: 'Категория',
+      col_type: 'Тип',
       col_amount: 'Сумма',
       col_currency: 'Валюта',
       col_description: 'Описание',
@@ -225,6 +241,7 @@
       label_active_filters: 'Активные фильтры:',
       filters_none: 'нет',
       filter_category: 'категория',
+      filter_type: 'тип',
       filter_from: 'from',
       filter_to: 'to',
       summary_quick: 'Быстрые периоды:',
@@ -250,8 +267,12 @@
       label_to: 'По',
       label_assistant_msg: 'Повідомлення',
       label_tx_category: 'Фільтр за категорією',
+      label_tx_type: 'Тип транзакції',
       label_limit: 'Ліміт',
       tx_category_all: 'Усі категорії',
+      tx_type_all: 'Усі',
+      tx_type_expense: 'Витрати',
+      tx_type_income: 'Дохід',
       btn_login: 'Login',
       btn_logout: 'Logout',
       btn_send_parse_text: 'Надіслати /parse-text',
@@ -264,8 +285,12 @@
       btn_ask_assistant: 'Спитати',
       summary_hint: 'Підсумок за категоріями та датами:',
       summary_drill_hint: 'Можна клікати по категоріях і датах, щоб фільтрувати таблицю транзакцій.',
+      summary_income: 'Дохід',
+      summary_expense: 'Витрати',
+      summary_balance: 'Баланс',
       col_date: 'Дата',
       col_category: 'Категорія',
+      col_type: 'Тип',
       col_amount: 'Сума',
       col_currency: 'Валюта',
       col_description: 'Опис',
@@ -293,6 +318,7 @@
       label_active_filters: 'Активні фільтри:',
       filters_none: 'немає',
       filter_category: 'категорія',
+      filter_type: 'тип',
       filter_from: 'з',
       filter_to: 'по',
       summary_quick: 'Швидкі періоди:',
@@ -318,8 +344,12 @@
       label_to: 'To',
       label_assistant_msg: 'Message',
       label_tx_category: 'Category filter',
+      label_tx_type: 'Transaction type',
       label_limit: 'Limit',
       tx_category_all: 'All categories',
+      tx_type_all: 'All',
+      tx_type_expense: 'Expenses',
+      tx_type_income: 'Income',
       btn_login: 'Login',
       btn_logout: 'Logout',
       btn_send_parse_text: 'Send /parse-text',
@@ -332,8 +362,12 @@
       btn_ask_assistant: 'Ask',
       summary_hint: 'Summary by categories and dates:',
       summary_drill_hint: 'Click categories or dates to filter the transactions table.',
+      summary_income: 'Income',
+      summary_expense: 'Expenses',
+      summary_balance: 'Balance',
       col_date: 'Date',
       col_category: 'Category',
+      col_type: 'Type',
       col_amount: 'Amount',
       col_currency: 'Currency',
       col_description: 'Description',
@@ -361,6 +395,7 @@
       label_active_filters: 'Active filters:',
       filters_none: 'none',
       filter_category: 'category',
+      filter_type: 'type',
       filter_from: 'from',
       filter_to: 'to',
       summary_quick: 'Quick ranges:',
@@ -617,11 +652,18 @@
     }
   }
 
+  function formatTxTypeLabel(type) {
+    if (type === 'income') return t('tx_type_income');
+    if (type === 'expense') return t('tx_type_expense');
+    return t('tx_type_all');
+  }
+
   function updateTransactionsFilterInfo() {
     const info = document.getElementById('txFiltersInfo');
     if (!info) return;
     const parts = [];
     if (activeTxFilters.category) parts.push(`${t('filter_category')}: ${getCategoryLabelForUi(activeTxFilters.category)}`);
+    if (activeTxFilters.type && activeTxFilters.type !== 'all') parts.push(`${t('filter_type')}: ${formatTxTypeLabel(activeTxFilters.type)}`);
     if (activeTxFilters.from) parts.push(`${t('filter_from')}: ${activeTxFilters.from}`);
     if (activeTxFilters.to) parts.push(`${t('filter_to')}: ${activeTxFilters.to}`);
     info.textContent = `${t('label_active_filters')} ${parts.length ? parts.join(', ') : t('filters_none')}`;
@@ -683,11 +725,26 @@
     updateTransactionsFilterInfo();
   }
 
+  function applyTypeFilterFromSelect() {
+    const select = document.getElementById('txTypeFilter');
+    activeTxFilters.type = select ? select.value || 'all' : 'all';
+    updateTransactionsFilterInfo();
+  }
+
   const categorySelect = document.getElementById('txCategoryFilter');
   if (categorySelect) {
     categorySelect.addEventListener('change', () => {
       applyCategoryFilterFromSelect();
       loadTransactions();
+    });
+  }
+
+  const typeSelect = document.getElementById('txTypeFilter');
+  if (typeSelect) {
+    typeSelect.addEventListener('change', () => {
+      applyTypeFilterFromSelect();
+      loadTransactions();
+      getSummary();
     });
   }
 
@@ -697,6 +754,7 @@
     const limit = limitInput && limitInput.value ? Number(limitInput.value) : 50;
     activeTxFilters.limit = Number.isFinite(limit) ? Math.max(1, Math.min(limit, 200)) : 50;
     applyCategoryFilterFromSelect();
+    applyTypeFilterFromSelect();
 
     const params = new URLSearchParams({
       page: String(activeTxFilters.page || 1),
@@ -705,6 +763,7 @@
     if (activeTxFilters.from) params.append('from', activeTxFilters.from);
     if (activeTxFilters.to) params.append('to', activeTxFilters.to);
     if (activeTxFilters.category) params.append('category', activeTxFilters.category);
+    if (activeTxFilters.type && activeTxFilters.type !== 'all') params.append('type', activeTxFilters.type);
 
     const res = await apiFetch('/api/finance/transactions?' + params.toString());
     const data = await res.json();
@@ -727,6 +786,8 @@
     const from = activeTxFilters.from || (fromInput && fromInput.value ? fromInput.value : '');
     const to = activeTxFilters.to || (toInput && toInput.value ? toInput.value : '');
 
+    applyTypeFilterFromSelect();
+
     if (!from || !to) {
       alert(t('msg_export_period_required'));
       return;
@@ -737,6 +798,7 @@
 
     const params = new URLSearchParams({ from, to, lang: currentUiLang || 'ru' });
     if (activeTxFilters.category) params.append('category', activeTxFilters.category);
+    if (activeTxFilters.type && activeTxFilters.type !== 'all') params.append('type', activeTxFilters.type);
 
     const res = await apiFetch('/api/finance/transactions/export?' + params.toString(), { method: 'GET' });
     if (!res.ok) {
@@ -770,7 +832,7 @@
     if (!rows.length) {
       const row = document.createElement('tr');
       const cell = document.createElement('td');
-      cell.colSpan = 7;
+      cell.colSpan = 8;
       cell.textContent = t('msg_no_transactions');
       row.appendChild(cell);
       tbody.appendChild(row);
@@ -784,6 +846,7 @@
       const cells = [
         dateStr,
         getCategoryLabelForUi(item.category),
+        formatTxTypeLabel(item.type || 'all'),
         String(item.amount ?? ''),
         item.currency || '',
         item.description || '',
@@ -865,11 +928,13 @@
     const toInput = document.getElementById('summaryTo');
     const from = fromInput ? fromInput.value : '';
     const to = toInput ? toInput.value : '';
+    applyTypeFilterFromSelect();
     if (!from || !to) {
       alert('from/to are required');
       return;
     }
     const params = new URLSearchParams({ from, to, groupBy: 'both' });
+    if (activeTxFilters.type && activeTxFilters.type !== 'all') params.append('type', activeTxFilters.type);
     const res = await apiFetch('/api/finance/summary?' + params.toString());
     const data = await res.json();
     const target = document.getElementById('summary');
@@ -877,6 +942,7 @@
       target.textContent = JSON.stringify(data, null, 2);
     }
     lastSummaryData = data;
+    renderSummaryTotals(data);
     renderSummaryTables(data);
     activeTxFilters.from = from;
     activeTxFilters.to = to;
@@ -954,6 +1020,29 @@
         byDateBody.appendChild(tr);
       }
     }
+  }
+
+  function renderSummaryTotals(data) {
+    const container = document.getElementById('summaryTotals');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!data) return;
+
+    const income = typeof data.incomeTotal === 'number' ? data.incomeTotal : 0;
+    const expense = typeof data.expenseTotal === 'number' ? data.expenseTotal : 0;
+    const balance = typeof data.balance === 'number' ? data.balance : income - expense;
+
+    const items = [
+      { label: t('summary_income'), value: income },
+      { label: t('summary_expense'), value: expense },
+      { label: t('summary_balance'), value: balance }
+    ];
+
+    items.forEach((item) => {
+      const span = document.createElement('span');
+      span.textContent = `${item.label}: ${item.value}`;
+      container.appendChild(span);
+    });
   }
 
   async function askAssistant() {
