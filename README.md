@@ -39,7 +39,7 @@
     "balance": 18000,
     "byCategory": [
       { "category": "food", "amount": 12000 },
-      { "category": "salary", "amount": 50000 }
+      { "category": "other", "amount": 50000 }
     ],
     "byDate": [
       { "date": "2025-12-10", "amount": 4500 },
@@ -52,7 +52,7 @@
 
   ```csv
   "date","type","categoryId","categoryLabel","amount","currency","description","source"
-  "2025-12-05","income","salary","Зарплата","50000","UAH","оклад","manual"
+  "2025-12-05","income","other","Другое","50000","UAH","оклад","manual"
   ```
 
 ## Быстрый старт

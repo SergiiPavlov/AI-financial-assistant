@@ -5,6 +5,7 @@ import path from "path";
 import { config } from "./config/env";
 import { apiRouter } from "./routes";
 import { attachUserFromAuthHeader } from "./lib/auth";
+import { HttpError } from "./lib/httpError";
 
 const app = express();
 
@@ -28,6 +29,12 @@ app.use("/api", apiRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
+  if (err instanceof HttpError || (typeof err === "object" && err && typeof err.status === "number")) {
+    const status = err.status;
+    const message = err.message || "Error";
+    return res.status(status).json({ error: message });
+  }
+
   res.status(500).json({ error: "Internal server error" });
 });
 

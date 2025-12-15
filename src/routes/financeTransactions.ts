@@ -12,6 +12,7 @@ import { TransactionType } from "@prisma/client";
 import { requireAuth } from "../lib/auth";
 import { config } from "../config/env";
 import { getCategoryLabel, Lang } from "../lib/categories";
+import { HttpError } from "../lib/httpError";
 
 export const financeTransactionsRouter = Router();
 financeTransactionsRouter.use(requireAuth(config));
@@ -40,11 +41,11 @@ const parseTransactionType = (value: any): TransactionType | undefined => {
 };
 
 const validateTransactionInput = (payload: any, userId: string): TransactionInput => {
-  const errors: string[] = [];
-
   if (!payload || typeof payload !== "object") {
-    throw new Error("Invalid transaction payload");
+    throw new HttpError(400, "Invalid transaction payload");
   }
+
+  const errors: string[] = [];
 
   if (typeof payload.userId === "string" && payload.userId.trim() && payload.userId.trim() !== userId) {
     errors.push("userId in payload does not match the authenticated user");
@@ -67,13 +68,13 @@ const validateTransactionInput = (payload: any, userId: string): TransactionInpu
       : "";
   if (!description) errors.push("description is required");
 
-  if (errors.length > 0) {
-    throw new Error(errors.join(", "));
-  }
-
   const type = parseTransactionType(payload.type);
   if (payload.type !== undefined && !type) {
     errors.push("type must be either expense or income");
+  }
+
+  if (errors.length > 0) {
+    throw new HttpError(400, errors.join(", "));
   }
 
   return {
@@ -221,8 +222,8 @@ financeTransactionsRouter.post("/", async (req, res, next) => {
     const created = await createTransactions(transactions);
     res.status(201).json(created.length === 1 ? created[0] : { items: created });
   } catch (error: any) {
-    if (error instanceof Error) {
-      return res.status(400).json({ error: error.message });
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
     }
     next(error);
   }
@@ -233,18 +234,12 @@ financeTransactionsRouter.post("/", async (req, res, next) => {
 financeTransactionsRouter.patch("/:id", async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!id) {
-      return res.status(400).json({ error: "id is required" });
-    }
     const updated = await updateTransaction(id, req.user!.id, req.body || {});
     // updateTransaction() уже приводит Decimal->number, так что можно отдавать как есть
     res.json({ item: updated });
   } catch (error: any) {
-    if (error instanceof Error && error.message.toLowerCase().includes("validation")) {
-      return res.status(400).json({ error: error.message });
-    }
-    if (error instanceof Error && error.message.includes("not found")) {
-      return res.status(404).json({ error: "Not found" });
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
     }
     next(error);
   }
@@ -256,8 +251,8 @@ financeTransactionsRouter.delete("/:id", async (req, res, next) => {
     await deleteTransaction(id, req.user!.id);
     res.status(204).send();
   } catch (error) {
-    if (error instanceof Error && error.message.includes("not found")) {
-      return res.status(404).json({ error: "Not found" });
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
     }
     next(error);
   }
