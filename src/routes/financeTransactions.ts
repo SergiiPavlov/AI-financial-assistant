@@ -3,6 +3,7 @@ import {
   createTransactions,
   deleteTransaction,
   listTransactions,
+  updateTransaction,
   TransactionInput
 } from "../services/financeService";
 
@@ -104,6 +105,25 @@ financeTransactionsRouter.post("/", async (req, res, next) => {
     res.status(201).json(created.length === 1 ? created[0] : { items: created });
   } catch (error: any) {
     if (error instanceof Error) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+
+
+financeTransactionsRouter.patch("/:id", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ error: "id is required" });
+    }
+    const updated = await updateTransaction(id, req.body || {});
+    // updateTransaction() уже приводит Decimal->number, так что можно отдавать как есть
+    res.json({ item: updated });
+  } catch (error: any) {
+    if (error instanceof Error && error.message.toLowerCase().includes("validation")) {
       return res.status(400).json({ error: error.message });
     }
     next(error);
