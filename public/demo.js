@@ -68,6 +68,8 @@
   function setCategoriesMeta(meta) {
     categoriesMeta = Array.isArray(meta) ? meta : [];
     categoryLabelById = Object.fromEntries(categoriesMeta.map((c) => [c.id, c.label]));
+    // Back-compat: older versions called renderCategoryFilterOptions().
+    // After splitting JS we kept updateCategoryFilterOptions(), so expose a small wrapper.
     renderCategoryFilterOptions();
     renderTransactionsTable(lastLoadedTransactions);
     if (lastSummaryData) {
@@ -183,9 +185,38 @@
     setAccessToken(data.accessToken || '');
     currentUser = data.user || null;
     updateAuthUi();
+
+    // UX: after login we auto-load summary. Ensure from/to are set so we don't show
+    // a confusing "set period" alert right after successful login.
+    ensureDefaultPeriods();
+
     await loadDrafts();
     await loadTransactions();
     await getSummary();
+  }
+
+  function ensureDefaultPeriods() {
+    // Summary period
+    const summaryFrom = document.getElementById('summaryFrom');
+    const summaryTo = document.getElementById('summaryTo');
+    if (summaryFrom && summaryTo && (!summaryFrom.value || !summaryTo.value)) {
+      const today = new Date();
+      const from = new Date(today.getFullYear(), today.getMonth(), 1);
+      const to = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      summaryFrom.value = toIsoDate(from);
+      summaryTo.value = toIsoDate(to);
+    }
+
+    // Analytics period (doesn't auto-load, but keeps UI ready)
+    const analyticsFrom = document.getElementById('analyticsFrom');
+    const analyticsTo = document.getElementById('analyticsTo');
+    if (analyticsFrom && analyticsTo && (!analyticsFrom.value || !analyticsTo.value)) {
+      const today = new Date();
+      const from = new Date(today.getFullYear(), today.getMonth(), 1);
+      const to = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      analyticsFrom.value = toIsoDate(from);
+      analyticsTo.value = toIsoDate(to);
+    }
   }
 
   async function logout() {
@@ -692,6 +723,12 @@
       select.appendChild(opt);
     });
     select.value = previous;
+  }
+
+  // Back-compat alias used by earlier iterations of the demo.
+  // Some flows (e.g. logout → bootstrap → category reload) still call this name.
+  function renderCategoryFilterOptions() {
+    updateCategoryFilterOptions();
   }
 
   function applyCategoryFilterFromSelect() {
