@@ -80,7 +80,58 @@ const normalizeTitle = (title?: string) => {
   return trimmed || null;
 };
 
-const normalizeDraftItems = (rawItems: any, allowEmpty = false): DraftItem[] => {
+const normalizeDraftItemsLenient = (rawItems: any, allowEmpty = false): DraftItem[] => {
+  if (!Array.isArray(rawItems)) {
+    return [];
+  }
+
+  const trimmedItems = rawItems.slice(0, MAX_DRAFT_ITEMS);
+  if (!allowEmpty && trimmedItems.length === 0) {
+    return [];
+  }
+
+  return trimmedItems.map((item) => {
+    const data = item && typeof item === "object" ? item : {};
+
+    const dateValue =
+      data.date instanceof Date
+        ? data.date
+        : typeof data.date === "string"
+          ? new Date(data.date)
+          : undefined;
+    const date = dateValue && !isNaN(dateValue.getTime())
+      ? dateValue.toISOString().split("T")[0]
+      : typeof data.date === "string"
+        ? data.date.trim()
+        : "";
+
+    const amount = Number(data.amount);
+    const currency =
+      typeof data.currency === "string" && data.currency.trim()
+        ? data.currency.trim().toUpperCase()
+        : "UAH";
+    const category = typeof data.category === "string" ? data.category.trim() : "";
+    const description =
+      data.description === undefined || data.description === null
+        ? ""
+        : String(data.description).trim();
+    const source =
+      typeof data.source === "string" && data.source.trim() ? data.source.trim() : "manual";
+    const type: TransactionType = data.type === "income" ? "income" : "expense";
+
+    return {
+      date,
+      amount: Number.isFinite(amount) ? amount : 0,
+      currency,
+      category,
+      description,
+      source,
+      type
+    };
+  });
+};
+
+const validateDraftItemsStrict = (rawItems: any, allowEmpty = false): DraftItem[] => {
   if (!Array.isArray(rawItems)) {
     throw new HttpError(400, "items must be an array");
   }
@@ -147,7 +198,7 @@ export const createDraft = async (params: CreateDraftParams) => {
   const source = normalizeSource(params.source);
   const lang = normalizeLang(params.lang);
   const title = normalizeTitle(params.title);
-  const items = normalizeDraftItems(params.items);
+  const items = validateDraftItemsStrict(params.items);
 
   const created = await prisma.financeDraftBatch.create({
     data: {
@@ -170,7 +221,7 @@ export const listDrafts = async (userId: string, limit = 20): Promise<{ items: D
   });
 
   const details: DraftDetails[] = drafts.map((draft) =>
-    toDraftDetails(draft, normalizeDraftItems(draft.items, true))
+    toDraftDetails(draft, normalizeDraftItemsLenient(draft.items, true))
   );
 
   return { items: details.map((item) => buildDraftSummary(item)) };
@@ -178,7 +229,7 @@ export const listDrafts = async (userId: string, limit = 20): Promise<{ items: D
 
 export const getDraftDetails = async (id: string, userId: string): Promise<{ draft: DraftDetails }> => {
   const draft = await ensureOwnDraft(id, userId);
-  const items = normalizeDraftItems(draft.items, true);
+  const items = normalizeDraftItemsLenient(draft.items, true);
   return { draft: toDraftDetails(draft, items) };
 };
 
@@ -193,7 +244,7 @@ export const updateDraft = async (params: UpdateDraftParams): Promise<{ draft: D
     data.title = normalizeTitle(params.title);
   }
   if (params.items !== undefined) {
-    data.items = normalizeDraftItems(params.items);
+    data.items = validateDraftItemsStrict(params.items);
   }
 
   if (Object.keys(data).length === 0) {
@@ -201,12 +252,15 @@ export const updateDraft = async (params: UpdateDraftParams): Promise<{ draft: D
   }
 
   const updated = await prisma.financeDraftBatch.update({ where: { id: params.id }, data });
-  const items = normalizeDraftItems(updated.items, true);
+  const items = normalizeDraftItemsLenient(updated.items, true);
   return { draft: toDraftDetails(updated, items) };
 };
 
-const mapDraftItemToTransactionInput = (item: DraftItem, userId: string): TransactionInput => {
-  const normalized = validateTransactionInput(item, { userId, pathPrefix: "draft item " });
+const mapDraftItemToTransactionInput = (item: DraftItem, userId: string, index: number): TransactionInput => {
+  const normalized = validateTransactionInput(
+    { ...item, date: item.date },
+    { userId, pathPrefix: `items[${index}].` }
+  );
   return {
     userId,
     date: normalized.date!,
@@ -225,13 +279,13 @@ export const applyDraft = async (id: string, userId: string) => {
     throw new HttpError(400, "Draft already discarded");
   }
 
-  const items = normalizeDraftItems(draft.items);
+  const items = validateDraftItemsStrict(draft.items);
   if (items.length === 0) {
     throw new HttpError(400, "Draft has no items");
   }
 
   const batchId = draft.appliedBatchId?.trim() || `draft:${draft.id}`;
-  const transactions = items.map((item) => mapDraftItemToTransactionInput(item, userId));
+  const transactions = items.map((item, index) => mapDraftItemToTransactionInput(item, userId, index));
   const result = await createTransactionsBulkIdempotent({
     userId,
     batchId,
