@@ -103,7 +103,11 @@ const normalizeCurrencyCode = (raw: unknown): string | null => {
   return null;
 };
 
-const applyCurrencyDefaults = (transactions: ParsedTransaction[]): { transactions: ParsedTransaction[]; warnings: string[] } => {
+
+const applyCurrencyDefaults = (
+  transactions: ParsedTransaction[],
+  originalText?: string
+): { transactions: ParsedTransaction[]; warnings: string[] } => {
   const warnings: string[] = [];
   let lastCurrency: string | null = null;
 
@@ -111,13 +115,16 @@ const applyCurrencyDefaults = (transactions: ParsedTransaction[]): { transaction
     let currency = normalizeCurrencyCode(tx.currency);
 
     if (currency) {
+      // Явно указанная валюта в ответе модели
       lastCurrency = currency;
     } else if (lastCurrency) {
+      // Явная "пустая" валюта — наследуем последнюю и фиксируем предупреждение
       currency = lastCurrency;
       warnings.push(
         `В транзакции #${index + 1} сумма ${tx.amount} унаследовала валюту ${currency} из предыдущей операции.`
       );
     } else {
+      // Вообще нигде не было валюты — используем базовую UAH
       currency = "UAH";
       warnings.push(
         `В транзакции #${index + 1} сумма ${tx.amount} без указанной валюты — использована валюта по умолчанию UAH.`
@@ -127,10 +134,49 @@ const applyCurrencyDefaults = (transactions: ParsedTransaction[]): { transaction
     return { ...tx, currency };
   });
 
+  // Дополнительное мягкое предупреждение: если в тексте валюта упомянута
+  // реже, чем количество сумм, значит часть операций опирается на контекст.
+  if (originalText && normalized.length > 1) {
+    const lower = originalText.toLowerCase();
+    const currencyTokens = [
+      "uah",
+      "грн",
+      "грив",
+      "₴",
+      "usd",
+      "доллар",
+      "дол.",
+      "$",
+      "eur",
+      "euro",
+      "евро",
+      "€",
+      "pln",
+      "zł",
+      "злот",
+      "gbp",
+      "фунт",
+      "£"
+    ];
+
+    let explicitMentions = 0;
+    for (const token of currencyTokens) {
+      let idx = lower.indexOf(token);
+      while (idx !== -1) {
+        explicitMentions += 1;
+        idx = lower.indexOf(token, idx + token.length);
+      }
+    }
+
+    if (explicitMentions > 0 && explicitMentions < normalized.length) {
+      warnings.push(
+        "В этой фразе валюта явно указана не для всех сумм — для части операций использована валюта по контексту (как у соседних сумм). Проверьте, всё ли верно."
+      );
+    }
+  }
+
   return { transactions: normalized, warnings };
 };
-
-
 const parseTransactionsWithLLM = async (userId: string, text: string): Promise<ParseTextResult> => {
   const today = new Date();
   const todayIso = today.toISOString().split("T")[0];
@@ -155,7 +201,7 @@ const parseTransactionsWithLLM = async (userId: string, text: string): Promise<P
         }))
     : [];
 
-  const { transactions, warnings: currencyWarnings } = applyCurrencyDefaults(rawTransactions);
+  const { transactions, warnings: currencyWarnings } = applyCurrencyDefaults(rawTransactions, text);
 
   return {
     userId,

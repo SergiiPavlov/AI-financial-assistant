@@ -21,6 +21,14 @@ export type TransactionInput = {
   source?: string;
 };
 
+export type TransactionUpdateInput = {
+  date?: string;
+  amount?: number;
+  currency?: string;
+  category?: string;
+  description?: string;
+};
+
 export type GroupByOption = "category" | "date" | "both";
 
 export type SummaryRequest = {
@@ -28,6 +36,12 @@ export type SummaryRequest = {
   from: Date;
   to: Date;
   groupBy?: GroupByOption;
+};
+
+const parseDate = (value?: string): Date | undefined => {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return isNaN(date.getTime()) ? undefined : date;
 };
 
 const toNumber = (value: Decimal | Prisma.Decimal): number => {
@@ -101,6 +115,58 @@ export const createTransactions = async (inputs: TransactionInput[]) => {
 
 export const deleteTransaction = async (id: string) => {
   await prisma.financeTransaction.delete({ where: { id } });
+};
+
+const validateTransactionUpdateInput = (input: TransactionUpdateInput) => {
+  const data: Prisma.FinanceTransactionUpdateInput = {};
+  if (input.date !== undefined) {
+    const date = parseDate(input.date);
+    if (!date) {
+      throw new Error("Invalid date");
+    }
+    data.date = date;
+  }
+  if (input.amount !== undefined) {
+    if (typeof input.amount !== "number" || !Number.isFinite(input.amount) || input.amount <= 0) {
+      throw new Error("Amount must be a positive number");
+    }
+    data.amount = new Prisma.Decimal(input.amount);
+  }
+  if (input.currency !== undefined) {
+    if (typeof input.currency !== "string" || !input.currency.trim()) {
+      throw new Error("Currency must be a non-empty string");
+    }
+    data.currency = input.currency.trim().toUpperCase();
+  }
+  if (input.category !== undefined) {
+    if (typeof input.category !== "string" || !input.category.trim()) {
+      throw new Error("Category must be a non-empty string");
+    }
+    data.category = input.category.trim();
+  }
+  if (input.description !== undefined) {
+    if (typeof input.description !== "string") {
+      throw new Error("Description must be a string");
+    }
+    data.description = input.description.trim();
+  }
+  return data;
+};
+
+export const updateTransaction = async (id: string, input: TransactionUpdateInput) => {
+  if (!id) {
+    throw new Error("id is required");
+  }
+  const data = validateTransactionUpdateInput(input);
+  const updated = await prisma.financeTransaction.update({
+    where: { id },
+    data
+  });
+
+  return {
+    ...updated,
+    amount: toNumber(updated.amount)
+  };
 };
 
 export const getSummary = async (params: SummaryRequest) => {
