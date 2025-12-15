@@ -160,6 +160,65 @@
   </section>
 
   <section>
+    <h2 data-i18n="section_analytics">Analytics / Аналітика / Аналитика</h2>
+    <div class="inline">
+      <label data-i18n="label_from" for="analyticsFrom">From</label>
+      <input id="analyticsFrom" placeholder="2025-12-01" />
+      <label data-i18n="label_to" for="analyticsTo">To</label>
+      <input id="analyticsTo" placeholder="2025-12-31" />
+    </div>
+    <div class="inline">
+      <label data-i18n="label_analytics_type" for="analyticsType">Type</label>
+      <select id="analyticsType">
+        <option value="expense" data-i18n="tx_type_expense">Expenses</option>
+        <option value="income" data-i18n="tx_type_income">Income</option>
+        <option value="all" data-i18n="tx_type_all">All</option>
+      </select>
+      <label data-i18n="label_top_n" for="analyticsTopN">Top N</label>
+      <input id="analyticsTopN" type="number" value="5" min="1" max="20" style="width:90px" />
+    </div>
+    <button data-i18n="btn_load_analytics" onclick="loadAnalytics()">Load analytics</button>
+    <div id="analyticsTotals" class="inline" style="gap: 12px; font-weight: 600;"></div>
+    <div id="analyticsError" class="muted"></div>
+    <pre id="analytics"></pre>
+    <div id="analyticsTables">
+      <h3 data-i18n="analytics_top_categories">Top categories</h3>
+      <table id="analyticsTopCategories">
+        <thead>
+          <tr>
+            <th data-i18n="col_category">Category</th>
+            <th data-i18n="col_amount">Amount</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <h3 data-i18n="analytics_daily_trend">Daily trend</h3>
+      <table id="analyticsDailyTrend">
+        <thead>
+          <tr>
+            <th data-i18n="col_date">Date</th>
+            <th data-i18n="col_amount">Amount</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <h3 data-i18n="analytics_largest">Largest transactions</h3>
+      <table id="analyticsLargest">
+        <thead>
+          <tr>
+            <th data-i18n="col_date">Date</th>
+            <th data-i18n="col_type">Type</th>
+            <th data-i18n="col_category">Category</th>
+            <th data-i18n="col_amount">Amount</th>
+            <th data-i18n="col_description">Description</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
     <h2 data-i18n="section_assistant">Вопрос ассистенту</h2>
     <label data-i18n="label_assistant_msg">Сообщение</label>
     <textarea id="assistantMsg" rows="2">Сколько потратил на еду в этом месяце?</textarea>
@@ -189,6 +248,14 @@
       label_from: 'From',
       label_to: 'To',
       label_assistant_msg: 'Сообщение',
+      section_analytics: 'Аналитика',
+      label_analytics_type: 'Тип аналитики',
+      label_top_n: 'Top N',
+      btn_load_analytics: 'Загрузить аналитику',
+      analytics_top_categories: 'Топ категорий',
+      analytics_daily_trend: 'Тренд по дням',
+      analytics_largest: 'Крупнейшие операции',
+      analytics_error_prefix: 'Ошибка',
       label_tx_category: 'Фильтр по категории',
       label_tx_type: 'Тип транзакции',
       label_limit: 'Лимит',
@@ -233,6 +300,7 @@
       msg_no_category: '(без категории)',
       msg_no_data: 'Нет данных',
       msg_export_period_required: 'Сначала задайте from/to в блоке «Сводка».',
+      msg_period_required: 'Сначала укажите период (from/to).',
       msg_export_failed: 'Не удалось экспортировать CSV.',
       col_actions: 'Действия',
       btn_edit: 'Правка',
@@ -299,6 +367,14 @@
       label_from: 'З',
       label_to: 'По',
       label_assistant_msg: 'Повідомлення',
+      section_analytics: 'Аналітика',
+      label_analytics_type: 'Тип аналітики',
+      label_top_n: 'Top N',
+      btn_load_analytics: 'Завантажити аналітику',
+      analytics_top_categories: 'Топ категорій',
+      analytics_daily_trend: 'Тренд за днями',
+      analytics_largest: 'Найбільші операції',
+      analytics_error_prefix: 'Помилка',
       label_tx_category: 'Фільтр за категорією',
       label_tx_type: 'Тип транзакції',
       label_limit: 'Ліміт',
@@ -343,6 +419,7 @@
       msg_no_category: '(без категорії)',
       msg_no_data: 'Немає даних',
       msg_export_period_required: 'Спочатку вкажіть from/to у блоці «Підсумок».',
+      msg_period_required: 'Спочатку вкажіть період (from/to).',
       msg_export_failed: 'Не вдалося експортувати CSV.',
       col_actions: 'Дії',
       btn_edit: 'Редагувати',
@@ -409,6 +486,14 @@
       label_from: 'From',
       label_to: 'To',
       label_assistant_msg: 'Message',
+      section_analytics: 'Analytics',
+      label_analytics_type: 'Analytics type',
+      label_top_n: 'Top N',
+      btn_load_analytics: 'Load analytics',
+      analytics_top_categories: 'Top categories',
+      analytics_daily_trend: 'Daily trend',
+      analytics_largest: 'Largest transactions',
+      analytics_error_prefix: 'Error',
       label_tx_category: 'Category filter',
       label_tx_type: 'Transaction type',
       label_limit: 'Limit',
@@ -453,6 +538,7 @@
       msg_no_category: '(no category)',
       msg_no_data: 'No data',
       msg_export_period_required: 'Set from/to in the Summary section first.',
+      msg_period_required: 'Please set the period (from/to) first.',
       msg_export_failed: 'Failed to export CSV.',
       col_actions: 'Actions',
       btn_edit: 'Edit',

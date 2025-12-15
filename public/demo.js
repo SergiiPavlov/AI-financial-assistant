@@ -7,6 +7,7 @@
   let lastDraftId = null;
   let lastLoadedTransactions = [];
   let lastSummaryData = null;
+  let lastAnalyticsData = null;
   let draftList = [];
   let currentDraft = null;
   let draftEditItems = [];
@@ -41,6 +42,14 @@
     });
     renderAssistantExamples();
     updateTransactionsFilterInfo();
+    if (lastSummaryData) {
+      renderSummaryTables(lastSummaryData);
+      renderSummaryTotals(lastSummaryData);
+    }
+    if (lastAnalyticsData) {
+      renderAnalyticsTables(lastAnalyticsData);
+      renderAnalyticsTotals(lastAnalyticsData);
+    }
   }
 
   const langSelect = document.getElementById('uiLangSelect');
@@ -63,6 +72,9 @@
     renderTransactionsTable(lastLoadedTransactions);
     if (lastSummaryData) {
       renderSummaryTables(lastSummaryData);
+    }
+    if (lastAnalyticsData) {
+      renderAnalyticsTables(lastAnalyticsData);
     }
     updateTransactionsFilterInfo();
   }
@@ -183,11 +195,16 @@
     updateAuthUi();
     document.getElementById('transactions').textContent = '';
     document.getElementById('summary').textContent = '';
+    document.getElementById('analytics').textContent = '';
+    const analyticsTotals = document.getElementById('analyticsTotals');
+    if (analyticsTotals) analyticsTotals.innerHTML = '';
+    renderAnalyticsError('');
     document.getElementById('transactionsTable').querySelector('tbody').innerHTML = '';
     draftList = [];
     currentDraft = null;
     draftEditItems = [];
     draftEditTitle = '';
+    lastAnalyticsData = null;
     renderDraftsList();
     renderDraftDetails();
   }
@@ -888,7 +905,7 @@
     const to = toInput ? toInput.value : '';
     applyTypeFilterFromSelect();
     if (!from || !to) {
-      alert('from/to are required');
+      alert(t('msg_period_required'));
       return;
     }
     const params = new URLSearchParams({ from, to, groupBy: 'both' });
@@ -1001,6 +1018,150 @@
       span.textContent = `${item.label}: ${item.value}`;
       container.appendChild(span);
     });
+  }
+
+  function renderAnalyticsError(message) {
+    const block = document.getElementById('analyticsError');
+    if (!block) return;
+    block.textContent = message ? `${t('analytics_error_prefix')}: ${message}` : '';
+  }
+
+  function renderAnalyticsTotals(data) {
+    const container = document.getElementById('analyticsTotals');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!data || !data.totals) return;
+
+    const income = typeof data.totals.incomeTotal === 'number' ? data.totals.incomeTotal : 0;
+    const expense = typeof data.totals.expenseTotal === 'number' ? data.totals.expenseTotal : 0;
+    const balance = typeof data.totals.balance === 'number' ? data.totals.balance : income - expense;
+
+    const items = [
+      { label: t('summary_income'), value: income },
+      { label: t('summary_expense'), value: expense },
+      { label: t('summary_balance'), value: balance }
+    ];
+
+    items.forEach((item) => {
+      const span = document.createElement('span');
+      span.textContent = `${item.label}: ${item.value}`;
+      container.appendChild(span);
+    });
+  }
+
+  function renderAnalyticsTables(data) {
+    const renderNoDataRow = (tbody, colSpan) => {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = colSpan;
+      td.textContent = t('msg_no_data');
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    };
+
+    const topBody = document.querySelector('#analyticsTopCategories tbody');
+    if (topBody) {
+      topBody.innerHTML = '';
+      if (Array.isArray(data?.topCategories) && data.topCategories.length) {
+        data.topCategories.forEach((row) => {
+          const tr = document.createElement('tr');
+          const tdCat = document.createElement('td');
+          tdCat.textContent = getCategoryLabelForUi(row.category);
+          const tdAmount = document.createElement('td');
+          tdAmount.textContent = String(row.amount ?? '');
+          tr.appendChild(tdCat);
+          tr.appendChild(tdAmount);
+          topBody.appendChild(tr);
+        });
+      } else {
+        renderNoDataRow(topBody, 2);
+      }
+    }
+
+    const trendBody = document.querySelector('#analyticsDailyTrend tbody');
+    if (trendBody) {
+      trendBody.innerHTML = '';
+      if (Array.isArray(data?.dailyTrend) && data.dailyTrend.length) {
+        data.dailyTrend.forEach((row) => {
+          const tr = document.createElement('tr');
+          const tdDate = document.createElement('td');
+          tdDate.textContent = row.date || '';
+          const tdAmount = document.createElement('td');
+          tdAmount.textContent = String(row.amount ?? '');
+          tr.appendChild(tdDate);
+          tr.appendChild(tdAmount);
+          trendBody.appendChild(tr);
+        });
+      } else {
+        renderNoDataRow(trendBody, 2);
+      }
+    }
+
+    const largestBody = document.querySelector('#analyticsLargest tbody');
+    if (largestBody) {
+      largestBody.innerHTML = '';
+      if (Array.isArray(data?.largestTransactions) && data.largestTransactions.length) {
+        data.largestTransactions.forEach((row) => {
+          const tr = document.createElement('tr');
+          const tdDate = document.createElement('td');
+          tdDate.textContent = row.date ? new Date(row.date).toISOString().slice(0, 10) : '';
+          const tdType = document.createElement('td');
+          tdType.textContent = formatTxTypeLabel(row.type || 'all');
+          const tdCategory = document.createElement('td');
+          tdCategory.textContent = getCategoryLabelForUi(row.category);
+          const tdAmount = document.createElement('td');
+          tdAmount.textContent = String(row.amount ?? '');
+          const tdDesc = document.createElement('td');
+          tdDesc.textContent = row.description || '';
+          tr.appendChild(tdDate);
+          tr.appendChild(tdType);
+          tr.appendChild(tdCategory);
+          tr.appendChild(tdAmount);
+          tr.appendChild(tdDesc);
+          largestBody.appendChild(tr);
+        });
+      } else {
+        renderNoDataRow(largestBody, 5);
+      }
+    }
+  }
+
+  async function loadAnalytics() {
+    if (!ensureLoggedIn()) return;
+    const fromInput = document.getElementById('analyticsFrom');
+    const toInput = document.getElementById('analyticsTo');
+    const typeSelect = document.getElementById('analyticsType');
+    const topNInput = document.getElementById('analyticsTopN');
+
+    const from = fromInput ? fromInput.value : '';
+    const to = toInput ? toInput.value : '';
+    const type = typeSelect ? typeSelect.value : 'expense';
+    const topNValue = topNInput && topNInput.value ? Number(topNInput.value) : 5;
+    const topN = Number.isFinite(topNValue) ? Math.max(1, Math.min(topNValue, 20)) : 5;
+
+    if (!from || !to) {
+      alert(t('msg_period_required'));
+      return;
+    }
+
+    const params = new URLSearchParams({ from, to, type: type || 'expense', topN: String(topN) });
+
+    const res = await apiFetch('/api/finance/analytics?' + params.toString());
+    const data = await res.json();
+    const target = document.getElementById('analytics');
+    if (target) {
+      target.textContent = JSON.stringify(data, null, 2);
+    }
+
+    if (!res.ok) {
+      renderAnalyticsError((data && data.error) || 'Failed to load analytics');
+      return;
+    }
+
+    renderAnalyticsError('');
+    lastAnalyticsData = data;
+    renderAnalyticsTotals(data);
+    renderAnalyticsTables(data);
   }
 
   async function askAssistant() {

@@ -12,6 +12,7 @@
   - `/api/finance/parse-text`, `/api/finance/voice`, `/api/finance/assistant`;
 - `/api/finance/transactions` (CRUD);
 - `/api/finance/summary` (агрегация по датам/категориям);
+- `/api/finance/analytics` (топ категорий, дневной тренд и крупнейшие операции);
 - `/api/finance/meta/categories?lang=ru|uk|en` (локализованные категории из `src/lib/categories.ts`).
 - `/api/finance/transactions/export?from=YYYY-MM-DD&to=YYYY-MM-DD&category=&lang=` — CSV-экспорт транзакций текущего пользователя (требует Authorization: Bearer). Ограничение: до 20 000 строк на выгрузку.
 
@@ -47,6 +48,28 @@
     ]
   }
   ```
+
+- `/api/finance/analytics?from=2025-12-01&to=2025-12-31&type=expense&topN=5&limitLargest=20` →
+
+  ```json
+  {
+    "period": { "from": "2025-12-01", "to": "2025-12-31", "type": "expense" },
+    "totals": { "incomeTotal": 1500, "expenseTotal": 3200, "balance": -1700 },
+    "topCategories": [
+      { "category": "food", "amount": 1200 },
+      { "category": "transport", "amount": 800 }
+    ],
+    "dailyTrend": [
+      { "date": "2025-12-01", "amount": 500 },
+      { "date": "2025-12-02", "amount": 200 }
+    ],
+    "largestTransactions": [
+      { "id": "...", "date": "2025-12-02", "amount": 700, "currency": "UAH", "category": "food", "description": "ужин", "type": "expense" }
+    ]
+  }
+  ```
+
+  Параметры: `from`/`to` обязательны, `type` = `expense`|`income`|`all` (по умолчанию `expense`), `topN` (по умолчанию 5, макс. 20) и `limitLargest` (по умолчанию 20, макс. 50). При `type=all` итоговые суммы строятся по доходам и расходам, а разбивки (`topCategories`, `dailyTrend`, `largestTransactions`) — по расходам.
 
 - `/api/finance/transactions/export?from=2025-12-01&to=2025-12-31&type=income` → CSV со строками вида:
 

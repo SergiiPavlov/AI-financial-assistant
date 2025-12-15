@@ -67,6 +67,15 @@ export type SummaryRequest = {
   groupBy?: GroupByOption;
 };
 
+export type AnalyticsRequest = {
+  userId: string;
+  from: Date;
+  to: Date;
+  type?: TransactionType | "all";
+  topN?: number;
+  limitLargest?: number;
+};
+
 export type TransactionsBulkResult = {
   duplicate: boolean;
   batchId: string;
@@ -416,5 +425,99 @@ export const getSummary = async (params: SummaryRequest) => {
             date: item.date.toISOString().split("T")[0],
             amount: toNumber(item._sum.amount || new Prisma.Decimal(0))
           }))
+  };
+};
+
+export const getAnalytics = async (params: AnalyticsRequest) => {
+  const { from, to, userId } = params;
+  const type: TransactionType | "all" = params.type === "income" || params.type === "all" ? params.type : "expense";
+  const topN = params.topN && params.topN > 0 ? Math.min(params.topN, 20) : 5;
+  const limitLargest = params.limitLargest && params.limitLargest > 0 ? Math.min(params.limitLargest, 50) : 20;
+
+  const baseWhere: Prisma.FinanceTransactionWhereInput = {
+    userId,
+    date: {
+      gte: from,
+      lte: to
+    }
+  };
+
+  const breakdownType: TransactionType = type === "income" ? "income" : "expense";
+  const breakdownWhere: Prisma.FinanceTransactionWhereInput = {
+    ...baseWhere,
+    type: breakdownType
+  };
+
+  const incomeTotalPromise =
+    type === "expense"
+      ? Promise.resolve({ _sum: { amount: new Prisma.Decimal(0) } })
+      : prisma.financeTransaction.aggregate({
+          where: { ...baseWhere, type: "income" },
+          _sum: { amount: true }
+        });
+
+  const expenseTotalPromise =
+    type === "income"
+      ? Promise.resolve({ _sum: { amount: new Prisma.Decimal(0) } })
+      : prisma.financeTransaction.aggregate({
+          where: { ...baseWhere, type: "expense" },
+          _sum: { amount: true }
+        });
+
+  const topCategoriesPromise = prisma.financeTransaction.groupBy({
+    where: breakdownWhere,
+    by: ["category"],
+    _sum: { amount: true },
+    orderBy: { _sum: { amount: "desc" } },
+    take: topN
+  });
+
+  const dailyTrendPromise = prisma.financeTransaction.groupBy({
+    where: breakdownWhere,
+    by: ["date"],
+    _sum: { amount: true },
+    orderBy: { date: "asc" }
+  });
+
+  const largestTransactionsPromise = prisma.financeTransaction.findMany({
+    where: breakdownWhere,
+    orderBy: { amount: "desc" },
+    take: limitLargest
+  });
+
+  const [incomeTotalResult, expenseTotalResult, topCategories, dailyTrend, largestTransactions] = await Promise.all([
+    incomeTotalPromise,
+    expenseTotalPromise,
+    topCategoriesPromise,
+    dailyTrendPromise,
+    largestTransactionsPromise
+  ]);
+
+  const incomeTotal = toNumber(incomeTotalResult._sum.amount || new Prisma.Decimal(0));
+  const expenseTotal = toNumber(expenseTotalResult._sum.amount || new Prisma.Decimal(0));
+
+  return {
+    period: {
+      from: from.toISOString().split("T")[0],
+      to: to.toISOString().split("T")[0],
+      type
+    },
+    totals: {
+      incomeTotal,
+      expenseTotal,
+      balance: incomeTotal - expenseTotal
+    },
+    topCategories: topCategories.map((item) => ({
+      category: item.category,
+      amount: toNumber(item._sum.amount || new Prisma.Decimal(0))
+    })),
+    dailyTrend: dailyTrend.map((item) => ({
+      date: item.date.toISOString().split("T")[0],
+      amount: toNumber(item._sum.amount || new Prisma.Decimal(0))
+    })),
+    largestTransactions: largestTransactions.map((item) => ({
+      ...item,
+      amount: toNumber(item.amount)
+    }))
   };
 };
