@@ -1,10 +1,12 @@
 import { Router } from "express";
+import { createHash } from "crypto";
 import { callChatModel, MissingApiKeyError } from "../lib/llmClient";
 import { transcribeAudio } from "../lib/whisperClient";
-import { createTransactions, getSummary } from "../services/financeService";
+import { createTransactionsBulkIdempotent, getSummary } from "../services/financeService";
 import { CATEGORY_IDS, normalizeCategoryId, getCategoryLabel, isCategoryId } from "../lib/categories";
 import { requireAuth } from "../lib/auth";
 import { config } from "../config/env";
+import { HttpError } from "../lib/httpError";
 
 export const financeAiRouter = Router();
 financeAiRouter.use(requireAuth(config));
@@ -15,6 +17,7 @@ type ParsedTransaction = {
   currency: string;
   category: string;
   description: string;
+  type: "expense" | "income";
   source?: string;
 };
 
@@ -43,6 +46,7 @@ const buildParserSystemPrompt = (todayIso: string) => {
       "currency": "UAH",
       "category": "${categoriesList}",
       "description": "кратко",
+      "type": "expense|income",
       "source": "voice|manual|import"
     }
   ],
@@ -61,13 +65,16 @@ const buildParserSystemPrompt = (todayIso: string) => {
 - "currency":
   - если в тексте явно названа валюта (UAH/грн/₴, USD/$, EUR/€ и т.п.) — поставь код валюты "UAH" | "USD" | "EUR";
   - если валюта не указана, оставь поле "currency" пустой строкой "" (не придумывай валюту сам).
-- "category":
-  - всегда одно из: ${categoriesList};
-  - если не уверен — используй "other" и добавь пояснение в "warnings".
-- "description" — коротко по-русски или по-украински, что это за трата.
-- "source":
-  - "voice" для голосового ввода,
-  - "manual" для текстового ввода,
+  - "category":
+    - всегда одно из: ${categoriesList};
+    - если не уверен — используй "other" и добавь пояснение в "warnings".
+  - "description" — коротко по-русски или по-украински, что это за трата.
+  - "type":
+    - "expense" для расходов, "income" для доходов;
+    - ориентиры: "получил/зарплата/возврат/подарили/пополнение/доход" → income; "купил/заплатил/оплатил/трата/расход" → expense.
+  - "source":
+    - "voice" для голосового ввода,
+    - "manual" для текстового ввода,
   - "import" для данных из других систем.
 
 Если часть фразы непонятна — не придумывай сумму, лучше добавь вопрос в "questions".`;
@@ -79,6 +86,49 @@ const safeJsonParse = (text: string): any => {
   } catch (error) {
     return undefined;
   }
+};
+
+const parseTransactionType = (value: unknown): ParsedTransaction["type"] | null => {
+  if (value === "expense" || value === "income") return value;
+  return null;
+};
+
+const buildBatchId = (userId: string, text: string, transactions: ParsedTransaction[]) => {
+  const hash = createHash("sha256");
+  hash.update(JSON.stringify({ userId, text: text || "", transactions }));
+  return hash.digest("hex");
+};
+
+const applyTypeDefaults = (
+  transactions: ParsedTransaction[],
+  originalText: string
+): { transactions: ParsedTransaction[]; warnings: string[] } => {
+  const warnings: string[] = [];
+  const normalized = transactions.map((tx, index) => {
+    const parsedType = parseTransactionType(tx.type);
+    if (parsedType) return tx;
+
+    const inferred = inferTypeFromText(`${tx.description || ""} ${originalText || ""}`);
+    const finalType = inferred || "expense";
+    warnings.push(
+      inferred
+        ? `В транзакции #${index + 1} не указан type — по тексту определено как ${finalType}.`
+        : `В транзакции #${index + 1} не указан или некорректный type — использован expense по умолчанию.`
+    );
+    return { ...tx, type: finalType };
+  });
+
+  return { transactions: normalized, warnings };
+};
+
+const inferTypeFromText = (text: string): ParsedTransaction["type"] | null => {
+  const lower = text.toLowerCase();
+  const incomeHints = ["получил", "зарплат", "возврат", "подар", "пополн", "доход", "income", "salary", "refund"];
+  const expenseHints = ["купил", "заплат", "оплат", "трата", "расход", "expense", "spent", "потрат"];
+
+  if (incomeHints.some((token) => lower.includes(token))) return "income";
+  if (expenseHints.some((token) => lower.includes(token))) return "expense";
+  return null;
 };
 
 
@@ -200,11 +250,13 @@ const parseTransactionsWithLLM = async (userId: string, text: string): Promise<P
           currency: typeof t.currency === "string" ? t.currency : "",
           category: normalizeCategoryId(t.category),
           description: typeof t.description === "string" ? t.description : "",
-          source: typeof t.source === "string" ? t.source : "voice"
+          source: typeof t.source === "string" ? t.source : "voice",
+          type: typeof t.type === "string" ? (t.type as ParsedTransaction["type"] | string) : ("" as any)
         }))
     : [];
 
-  const { transactions, warnings: currencyWarnings } = applyCurrencyDefaults(rawTransactions, text);
+  const { transactions: withType, warnings: typeWarnings } = applyTypeDefaults(rawTransactions, text);
+  const { transactions, warnings: currencyWarnings } = applyCurrencyDefaults(withType, text);
 
   return {
     userId,
@@ -212,6 +264,7 @@ const parseTransactionsWithLLM = async (userId: string, text: string): Promise<P
     transactions,
     warnings: [
       ...(Array.isArray(parsed.warnings) ? parsed.warnings : []),
+      ...typeWarnings,
       ...currencyWarnings
     ],
     questions: Array.isArray(parsed.questions) ? parsed.questions : []
@@ -599,7 +652,8 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
       userId: req.user!.id,
       from: new Date(interpretation.period.from),
       to: new Date(interpretation.period.to),
-      groupBy: "both"
+      groupBy: "both",
+      type: "expense"
     });
 
     // Нормализуем намерение: если модель вернула категорию, но intent не "category",
@@ -616,7 +670,7 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
       intent = "category";
     }
 
-    let amount = summary.total;
+    let amount = summary.expenseTotal;
     let categoryAmount: number | undefined;
 
     if (intent === "category" && category) {
@@ -634,7 +688,7 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
       amount = biggest.amount;
     }
 
-    const share = summary.total > 0 ? Number((amount / summary.total).toFixed(2)) : 0;
+    const share = summary.expenseTotal > 0 ? Number((amount / summary.expenseTotal).toFixed(2)) : 0;
     const categoryLabel =
       category && typeof category === "string" && isCategoryId(category)
         ? getCategoryLabel(category, "ru")
@@ -655,7 +709,7 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
         period: summary.period,
         category,
         amount,
-        total: summary.total,
+        total: summary.expenseTotal,
         share,
         intent
       }
@@ -670,24 +724,48 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
 
 financeAiRouter.post("/parse-and-save", async (req, res, next) => {
   try {
-    const { text } = req.body || {};
+    const { text, batchId: requestedBatchId } = req.body || {};
     if (!text) {
       return res.status(400).json({ error: "text is required" });
     }
     const userId = req.user!.id;
     const parsed = await parseTransactionsWithLLM(userId, text);
-    const created = await createTransactions(
-      parsed.transactions.map((t) => ({
+    const batchId =
+      typeof requestedBatchId === "string" && requestedBatchId.trim()
+        ? requestedBatchId.trim()
+        : buildBatchId(userId, text, parsed.transactions);
+
+    const transactions = parsed.transactions.map((t, index) => {
+      const date = new Date(t.date);
+      if (isNaN(date.getTime())) {
+        throw new HttpError(400, `Invalid date in transaction #${index + 1}`);
+      }
+
+      return {
         userId,
-        date: new Date(t.date),
+        date,
         amount: t.amount,
         currency: t.currency,
         category: t.category,
         description: t.description,
-        source: t.source || "voice"
-      }))
-    );
-    res.status(201).json({ ...parsed, transactions: created });
+        source: t.source || "voice",
+        type: t.type
+      };
+    });
+
+    const result = await createTransactionsBulkIdempotent({
+      userId,
+      batchId,
+      transactions
+    });
+
+    res.status(result.duplicate ? 200 : 201).json({
+      ...parsed,
+      batchId: result.batchId,
+      duplicate: result.duplicate,
+      transactionIds: result.transactionIds,
+      transactions: result.items || parsed.transactions
+    });
   } catch (error) {
     if (error instanceof MissingApiKeyError) {
       return res.status(503).json({ error: error.message });
