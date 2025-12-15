@@ -669,28 +669,41 @@
     info.textContent = `${t('label_active_filters')} ${parts.length ? parts.join(', ') : t('filters_none')}`;
   }
 
+  async function buildTransactionsBatchId(transactions) {
+    const userId = currentUser ? currentUser.id : '';
+    const encoder = new TextEncoder();
+    const payload = encoder.encode(JSON.stringify({ userId, transactions }));
+    const hashBuffer = await crypto.subtle.digest('SHA-256', payload);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return `batch-${hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+  }
+
   async function saveParsed() {
     if (!ensureLoggedIn()) return;
     if (!lastParse || !Array.isArray(lastParse.transactions)) {
       alert(t('msg_parse_text_first'));
       return;
     }
-    const fingerprint = JSON.stringify({ tx: lastParse.transactions });
-    if (lastSavedKey === fingerprint) {
+    const items = lastParse.transactions.map((t) => ({ ...t, userId: currentUser ? currentUser.id : undefined }));
+    const batchId = await buildTransactionsBatchId(items);
+    if (lastSavedKey === batchId) {
       alert(t('msg_already_saved'));
       return;
     }
-    const items = lastParse.transactions.map((t) => ({ ...t }));
-    const res = await apiFetch('/api/finance/transactions', {
+    const res = await apiFetch('/api/finance/transactions/bulk', {
       method: 'POST',
-      body: JSON.stringify({ items })
+      body: JSON.stringify({ batchId, transactions: items })
     });
     const data = await res.json();
-    lastSavedKey = fingerprint;
+    if (!res.ok) {
+      alert(data?.error || 'Failed to save');
+      return;
+    }
+    lastSavedKey = batchId;
     const btn = document.getElementById('saveParsedBtn');
     if (btn) {
       btn.disabled = true;
-      btn.textContent = t('btn_save_transactions_done');
+      btn.textContent = data.duplicate ? t('msg_already_saved') : t('btn_save_transactions_done');
     }
     const target = document.getElementById('transactions');
     if (target) {

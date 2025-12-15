@@ -32,6 +32,8 @@ export type TransactionForExport = {
   description: string;
   source: string;
   type: TransactionType;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 export type TransactionInput = {
@@ -62,6 +64,13 @@ export type SummaryRequest = {
   to: Date;
   type?: TransactionType | "all";
   groupBy?: GroupByOption;
+};
+
+export type TransactionsBulkResult = {
+  duplicate: boolean;
+  batchId: string;
+  transactionIds: string[];
+  items?: TransactionForExport[];
 };
 
 const parseDate = (value?: string): Date | undefined => {
@@ -175,6 +184,96 @@ export const createTransactions = async (inputs: TransactionInput[]) => {
     ...item,
     amount: toNumber(item.amount)
   }));
+};
+
+export const createTransactionsBulkIdempotent = async (params: {
+  userId: string;
+  batchId: string;
+  transactions: TransactionInput[];
+  maxItems?: number;
+}): Promise<TransactionsBulkResult> => {
+  const { userId, transactions } = params;
+  const batchId = params.batchId?.trim();
+  const maxItems = params.maxItems ?? 200;
+
+  if (!batchId) {
+    throw new HttpError(400, "batchId is required");
+  }
+
+  if (!Array.isArray(transactions) || transactions.length === 0) {
+    throw new HttpError(400, "transactions array is required");
+  }
+
+  if (transactions.length > maxItems) {
+    throw new HttpError(400, `Too many transactions. Max ${maxItems} allowed`);
+  }
+
+  const existingBatch = await prisma.financeImportBatch.findUnique({
+    where: { userId_batchId: { userId, batchId } }
+  });
+
+  if (existingBatch) {
+    const existingTransactions = await prisma.financeTransaction.findMany({
+      where: {
+        userId,
+        id: { in: existingBatch.transactionIds }
+      }
+    });
+
+    const itemsById = new Map(
+      existingTransactions.map((item) => [item.id, { ...item, amount: toNumber(item.amount) }])
+    );
+    const orderedItems = existingBatch.transactionIds
+      .map((id) => itemsById.get(id))
+      .filter((item): item is TransactionForExport => Boolean(item));
+
+    return {
+      duplicate: true,
+      batchId: existingBatch.batchId,
+      transactionIds: existingBatch.transactionIds,
+      items: orderedItems
+    };
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const created: TransactionForExport[] = [];
+    const transactionIds: string[] = [];
+
+    for (const data of transactions) {
+      const createdTx = await tx.financeTransaction.create({
+        data: {
+          userId: data.userId,
+          date: data.date,
+          amount: new Prisma.Decimal(data.amount),
+          currency: data.currency || "UAH",
+          category: data.category,
+          description: data.description,
+          source: data.source || "manual",
+          type: data.type || "expense"
+        }
+      });
+
+      transactionIds.push(createdTx.id);
+      created.push({ ...createdTx, amount: toNumber(createdTx.amount) });
+    }
+
+    await tx.financeImportBatch.create({
+      data: {
+        userId,
+        batchId,
+        transactionIds
+      }
+    });
+
+    return {
+      duplicate: false,
+      batchId,
+      transactionIds,
+      items: created
+    };
+  });
+
+  return result;
 };
 
 export const deleteTransaction = async (id: string, userId: string) => {

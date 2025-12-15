@@ -6,7 +6,8 @@ import {
   listTransactions,
   updateTransaction,
   TransactionForExport,
-  TransactionInput
+  TransactionInput,
+  createTransactionsBulkIdempotent
 } from "../services/financeService";
 import { TransactionType } from "@prisma/client";
 import { requireAuth } from "../lib/auth";
@@ -18,6 +19,7 @@ export const financeTransactionsRouter = Router();
 financeTransactionsRouter.use(requireAuth(config));
 
 const MAX_EXPORT_ROWS = 20000;
+const MAX_BULK_ITEMS = 200;
 
 const isSupportedLang = (value: string): value is Lang => {
   return value === "ru" || value === "uk" || value === "en";
@@ -221,6 +223,40 @@ financeTransactionsRouter.post("/", async (req, res, next) => {
     const transactions = parsedItems.map((item) => validateTransactionInput(item, userId));
     const created = await createTransactions(transactions);
     res.status(201).json(created.length === 1 ? created[0] : { items: created });
+  } catch (error: any) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+financeTransactionsRouter.post("/bulk", async (req, res, next) => {
+  try {
+    const userId = req.user!.id;
+    const { batchId, transactions } = req.body || {};
+
+    if (typeof batchId !== "string" || !batchId.trim()) {
+      throw new HttpError(400, "batchId is required");
+    }
+
+    if (!Array.isArray(transactions) || transactions.length === 0) {
+      throw new HttpError(400, "transactions must be a non-empty array");
+    }
+
+    if (transactions.length > MAX_BULK_ITEMS) {
+      throw new HttpError(400, `Too many transactions. Max ${MAX_BULK_ITEMS} allowed`);
+    }
+
+    const parsedTransactions = transactions.map((item: any) => validateTransactionInput(item, userId));
+    const result = await createTransactionsBulkIdempotent({
+      userId,
+      batchId: batchId.trim(),
+      transactions: parsedTransactions,
+      maxItems: MAX_BULK_ITEMS
+    });
+
+    res.status(result.duplicate ? 200 : 201).json(result);
   } catch (error: any) {
     if (error instanceof HttpError) {
       return res.status(error.status).json({ error: error.message });
