@@ -2,15 +2,24 @@ import { Router } from "express";
 import {
   createTransactions,
   deleteTransaction,
+  getTransactionsForExport,
   listTransactions,
   updateTransaction,
+  TransactionForExport,
   TransactionInput
 } from "../services/financeService";
 import { requireAuth } from "../lib/auth";
 import { config } from "../config/env";
+import { getCategoryLabel, Lang } from "../lib/categories";
 
 export const financeTransactionsRouter = Router();
 financeTransactionsRouter.use(requireAuth(config));
+
+const MAX_EXPORT_ROWS = 20000;
+
+const isSupportedLang = (value: string): value is Lang => {
+  return value === "ru" || value === "uk" || value === "en";
+};
 
 const parseDate = (value?: string): Date | undefined => {
   if (!value) return undefined;
@@ -70,6 +79,43 @@ const validateTransactionInput = (payload: any, userId: string): TransactionInpu
   };
 };
 
+const escapeCsvValue = (value: unknown) => {
+  const str = value === null || value === undefined ? "" : String(value);
+  return `"${str.replace(/"/g, '""')}"`;
+};
+
+const buildCsv = (items: TransactionForExport[], lang: Lang): string => {
+  const header = [
+    "date",
+    "type",
+    "categoryId",
+    "categoryLabel",
+    "amount",
+    "currency",
+    "description",
+    "source"
+  ];
+
+  const lines = [header.map(escapeCsvValue).join(",")];
+
+  for (const item of items) {
+    const dateStr = item.date.toISOString().split("T")[0];
+    const row = [
+      dateStr,
+      "expense",
+      item.category,
+      getCategoryLabel(item.category, lang),
+      String(item.amount),
+      item.currency,
+      item.description,
+      item.source
+    ];
+    lines.push(row.map(escapeCsvValue).join(","));
+  }
+
+  return lines.join("\n");
+};
+
 financeTransactionsRouter.get("/", async (req, res, next) => {
   try {
     const { from, to, category, page, limit } = req.query;
@@ -89,6 +135,49 @@ financeTransactionsRouter.get("/", async (req, res, next) => {
     });
 
     res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+financeTransactionsRouter.get("/export", async (req, res, next) => {
+  try {
+    const { from, to, category, lang } = req.query;
+    if (typeof from !== "string" || typeof to !== "string") {
+      return res.status(400).json({ error: "from and to are required" });
+    }
+
+    const fromDate = parseDate(from);
+    const toDate = parseDate(to);
+    if (!fromDate || !toDate) {
+      return res.status(400).json({ error: "Invalid from/to dates" });
+    }
+
+    const selectedLang: Lang = typeof lang === "string" && isSupportedLang(lang) ? lang : "ru";
+    const categoryFilter =
+      typeof category === "string" && category.trim() ? category.trim() : undefined;
+
+    const { items, exceedsLimit } = await getTransactionsForExport({
+      userId: req.user!.id,
+      from: fromDate,
+      to: toDate,
+      category: categoryFilter,
+      maxRows: MAX_EXPORT_ROWS
+    });
+
+    if (exceedsLimit) {
+      return res
+        .status(413)
+        .json({ error: `Too many transactions to export, max ${MAX_EXPORT_ROWS} rows allowed` });
+    }
+
+    const csv = buildCsv(items, selectedLang);
+    const fromLabel = fromDate.toISOString().split("T")[0];
+    const toLabel = toDate.toISOString().split("T")[0];
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename=\"transactions_${fromLabel}_${toLabel}.csv\"`);
+    res.status(200).send(csv);
   } catch (error) {
     next(error);
   }

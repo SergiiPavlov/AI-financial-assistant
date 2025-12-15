@@ -81,7 +81,10 @@
       <input id="txLimit" type="number" value="50" min="1" max="200" style="width:90px" />
     </div>
     <div id="txFiltersInfo" class="muted"></div>
-    <button data-i18n="btn_load_transactions" onclick="loadTransactions()">Загрузить /transactions</button>
+    <div class="inline">
+      <button data-i18n="btn_load_transactions" onclick="loadTransactions()">Загрузить /transactions</button>
+      <button data-i18n="btn_export_csv" type="button" onclick="exportTransactionsCsv()">Экспорт CSV</button>
+    </div>
     <pre id="transactions"></pre>
     <div class="muted" data-i18n="quick_table_hint">Таблица для быстрого просмотра:</div>
     <table id="transactionsTable">
@@ -188,6 +191,7 @@
       btn_save_transactions_done: 'Сохранено',
       btn_send_voice: 'Отправить /voice',
       btn_load_transactions: 'Загрузить /transactions',
+      btn_export_csv: 'Экспорт CSV',
       btn_get_summary: 'Получить summary',
       btn_ask_assistant: 'Спросить',
       summary_hint: 'Сводка по категориям и датам:',
@@ -207,6 +211,8 @@
       msg_no_transactions: 'Транзакций нет',
       msg_no_category: '(без категории)',
       msg_no_data: 'Нет данных',
+      msg_export_period_required: 'Сначала задайте from/to в блоке «Сводка».',
+      msg_export_failed: 'Не удалось экспортировать CSV.',
       col_actions: 'Действия',
       btn_edit: 'Правка',
       btn_delete: 'Удалить',
@@ -253,6 +259,7 @@
       btn_save_transactions_done: 'Збережено',
       btn_send_voice: 'Надіслати /voice',
       btn_load_transactions: 'Завантажити /transactions',
+      btn_export_csv: 'Експорт CSV',
       btn_get_summary: 'Отримати summary',
       btn_ask_assistant: 'Спитати',
       summary_hint: 'Підсумок за категоріями та датами:',
@@ -272,6 +279,8 @@
       msg_no_transactions: 'Транзакцій немає',
       msg_no_category: '(без категорії)',
       msg_no_data: 'Немає даних',
+      msg_export_period_required: 'Спочатку вкажіть from/to у блоці «Підсумок».',
+      msg_export_failed: 'Не вдалося експортувати CSV.',
       col_actions: 'Дії',
       btn_edit: 'Редагувати',
       btn_delete: 'Видалити',
@@ -318,6 +327,7 @@
       btn_save_transactions_done: 'Saved',
       btn_send_voice: 'Send /voice',
       btn_load_transactions: 'Load /transactions',
+      btn_export_csv: 'Export CSV',
       btn_get_summary: 'Get summary',
       btn_ask_assistant: 'Ask',
       summary_hint: 'Summary by categories and dates:',
@@ -337,6 +347,8 @@
       msg_no_transactions: 'No transactions',
       msg_no_category: '(no category)',
       msg_no_data: 'No data',
+      msg_export_period_required: 'Set from/to in the Summary section first.',
+      msg_export_failed: 'Failed to export CSV.',
       col_actions: 'Actions',
       btn_edit: 'Edit',
       btn_delete: 'Delete',
@@ -706,6 +718,46 @@
     updateCategoryFilterOptions();
     renderTransactionsTable(items);
     updateTransactionsFilterInfo();
+  }
+
+  async function exportTransactionsCsv() {
+    if (!ensureLoggedIn()) return;
+    const fromInput = document.getElementById('summaryFrom');
+    const toInput = document.getElementById('summaryTo');
+    const from = activeTxFilters.from || (fromInput && fromInput.value ? fromInput.value : '');
+    const to = activeTxFilters.to || (toInput && toInput.value ? toInput.value : '');
+
+    if (!from || !to) {
+      alert(t('msg_export_period_required'));
+      return;
+    }
+
+    activeTxFilters.from = from;
+    activeTxFilters.to = to;
+
+    const params = new URLSearchParams({ from, to, lang: currentUiLang || 'ru' });
+    if (activeTxFilters.category) params.append('category', activeTxFilters.category);
+
+    const res = await apiFetch('/api/finance/transactions/export?' + params.toString(), { method: 'GET' });
+    if (!res.ok) {
+      try {
+        const error = await res.json();
+        alert((error && error.error) || t('msg_export_failed'));
+      } catch (e) {
+        alert(t('msg_export_failed'));
+      }
+      return;
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `transactions_${from}_${to}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 
   function renderTransactionsTable(items) {

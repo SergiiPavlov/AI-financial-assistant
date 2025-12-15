@@ -11,6 +11,25 @@ export type TransactionFilter = {
   limit?: number;
 };
 
+export type TransactionExportFilter = {
+  userId: string;
+  from: Date;
+  to: Date;
+  category?: string;
+  maxRows?: number;
+};
+
+export type TransactionForExport = {
+  id: string;
+  userId: string;
+  date: Date;
+  amount: number;
+  currency: string;
+  category: string;
+  description: string;
+  source: string;
+};
+
 export type TransactionInput = {
   userId: string;
   date: Date;
@@ -87,6 +106,37 @@ export const listTransactions = async (filter: TransactionFilter) => {
     page,
     limit,
     total
+  };
+};
+
+export const getTransactionsForExport = async (filter: TransactionExportFilter) => {
+  const maxRows = filter.maxRows && filter.maxRows > 0 ? Math.min(filter.maxRows, 20000) : 20000;
+
+  const where: Prisma.FinanceTransactionWhereInput = {
+    userId: filter.userId,
+    ...(filter.category ? { category: filter.category } : {}),
+    date: {
+      gte: filter.from,
+      lte: filter.to
+    }
+  };
+
+  const items = await prisma.financeTransaction.findMany({
+    where,
+    orderBy: { date: "asc" },
+    take: maxRows + 1
+  });
+
+  const normalized = items.map<TransactionForExport>((item) => ({
+    ...item,
+    amount: toNumber(item.amount)
+  }));
+
+  const exceedsLimit = normalized.length > maxRows;
+
+  return {
+    items: exceedsLimit ? normalized.slice(0, maxRows) : normalized,
+    exceedsLimit
   };
 };
 
