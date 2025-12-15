@@ -11,7 +11,7 @@ export const CATEGORY_IDS = [
 
 export type CategoryId = (typeof CATEGORY_IDS)[number];
 
-type Lang = "en" | "ru" | "uk";
+export type Lang = "en" | "ru" | "uk";
 
 export const CATEGORY_LABELS: Record<CategoryId, Record<Lang, string>> = {
   food: {
@@ -202,4 +202,11 @@ export const getCategoryLabel = (id: string | null | undefined, lang: Lang = "ru
     return "";
   }
   return CATEGORY_LABELS[id][lang] || id;
+};
+
+export const getCategoriesMeta = (lang: Lang = "ru") => {
+  return CATEGORY_IDS.map((id) => ({
+    id,
+    label: getCategoryLabel(id, lang)
+  }));
 };
