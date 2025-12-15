@@ -2,6 +2,7 @@ import { DraftStatus, Prisma, TransactionType } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../lib/httpError";
 import { createTransactionsBulkIdempotent, TransactionInput } from "./financeService";
+import { validateTransactionInput } from "../lib/validation/financeTransaction";
 
 const MAX_DRAFT_ITEMS = 200;
 const SUPPORTED_LANGS = new Set(["ru", "uk", "en"]);
@@ -79,17 +80,6 @@ const normalizeTitle = (title?: string) => {
   return trimmed || null;
 };
 
-const normalizeDateString = (value: any, index: number) => {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new HttpError(400, `items[${index}].date is required`);
-  }
-  const date = new Date(value);
-  if (isNaN(date.getTime())) {
-    throw new HttpError(400, `items[${index}].date must be a valid date`);
-  }
-  return date.toISOString().split("T")[0];
-};
-
 const normalizeDraftItems = (rawItems: any, allowEmpty = false): DraftItem[] => {
   if (!Array.isArray(rawItems)) {
     throw new HttpError(400, "items must be an array");
@@ -102,43 +92,19 @@ const normalizeDraftItems = (rawItems: any, allowEmpty = false): DraftItem[] => 
   }
 
   return rawItems.map((item, index) => {
-    const date = normalizeDateString((item as any)?.date, index);
-    const amount = Number((item as any)?.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      throw new HttpError(400, `items[${index}].amount must be a positive number`);
-    }
-
-    const category = typeof (item as any)?.category === "string" ? (item as any).category.trim() : "";
-    if (!category) {
-      throw new HttpError(400, `items[${index}].category is required`);
-    }
-
-    const description = typeof (item as any)?.description === "string" ? (item as any).description.trim() : "";
-    if (!description) {
-      throw new HttpError(400, `items[${index}].description is required`);
-    }
-
-    const currency =
-      typeof (item as any)?.currency === "string" && (item as any).currency.trim()
-        ? (item as any).currency.trim().toUpperCase()
-        : "UAH";
-
-    const source =
-      typeof (item as any)?.source === "string" && (item as any).source.trim()
-        ? (item as any).source.trim()
-        : "manual";
-
-    const typeValue = (item as any)?.type;
-    const type: TransactionType = typeValue === "income" || typeValue === "expense" ? typeValue : "expense";
+    const normalized = validateTransactionInput(item, {
+      partial: false,
+      pathPrefix: `items[${index}].`
+    });
 
     return {
-      date,
-      amount,
-      currency,
-      category,
-      description,
-      source,
-      type
+      date: normalized.date!.toISOString().split("T")[0],
+      amount: normalized.amount!,
+      currency: normalized.currency!,
+      category: normalized.category!,
+      description: normalized.description!,
+      source: normalized.source!,
+      type: normalized.type as TransactionType
     };
   });
 };
@@ -240,19 +206,16 @@ export const updateDraft = async (params: UpdateDraftParams): Promise<{ draft: D
 };
 
 const mapDraftItemToTransactionInput = (item: DraftItem, userId: string): TransactionInput => {
-  const date = new Date(item.date);
-  if (isNaN(date.getTime())) {
-    throw new HttpError(400, "Draft item has invalid date");
-  }
+  const normalized = validateTransactionInput(item, { userId, pathPrefix: "draft item " });
   return {
     userId,
-    date,
-    amount: item.amount,
-    currency: item.currency,
-    category: item.category,
-    description: item.description,
-    source: item.source,
-    type: item.type
+    date: normalized.date!,
+    amount: normalized.amount!,
+    currency: normalized.currency!,
+    category: normalized.category!,
+    description: normalized.description!,
+    source: normalized.source!,
+    type: normalized.type as TransactionType
   };
 };
 

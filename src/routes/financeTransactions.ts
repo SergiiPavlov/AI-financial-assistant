@@ -14,6 +14,7 @@ import { requireAuth } from "../lib/auth";
 import { config } from "../config/env";
 import { getCategoryLabel, Lang } from "../lib/categories";
 import { HttpError } from "../lib/httpError";
+import { validateTransactionInput } from "../lib/validation/financeTransaction";
 
 export const financeTransactionsRouter = Router();
 financeTransactionsRouter.use(requireAuth(config));
@@ -40,58 +41,6 @@ const parseNumber = (value: string | undefined): number | undefined => {
 const parseTransactionType = (value: any): TransactionType | undefined => {
   if (value === "income" || value === "expense") return value;
   return undefined;
-};
-
-const validateTransactionInput = (payload: any, userId: string): TransactionInput => {
-  if (!payload || typeof payload !== "object") {
-    throw new HttpError(400, "Invalid transaction payload");
-  }
-
-  const errors: string[] = [];
-
-  if (typeof payload.userId === "string" && payload.userId.trim() && payload.userId.trim() !== userId) {
-    errors.push("userId in payload does not match the authenticated user");
-  }
-
-  const dateValue = parseDate(payload.date);
-  if (!dateValue) errors.push("date is required and must be a valid date");
-
-  const amount = Number(payload.amount);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    errors.push("amount must be a positive number");
-  }
-
-  const category = typeof payload.category === "string" ? payload.category.trim() : "";
-  if (!category) errors.push("category is required");
-
-  const description =
-    typeof payload.description === "string" && payload.description.trim().length > 0
-      ? payload.description.trim()
-      : "";
-  if (!description) errors.push("description is required");
-
-  const type = parseTransactionType(payload.type);
-  if (payload.type !== undefined && !type) {
-    errors.push("type must be either expense or income");
-  }
-
-  if (errors.length > 0) {
-    throw new HttpError(400, errors.join(", "));
-  }
-
-  return {
-    userId,
-    date: dateValue!,
-    amount,
-    currency: typeof payload.currency === "string" && payload.currency.trim() ? payload.currency : "UAH",
-    category,
-    description,
-    source:
-      typeof payload.source === "string" && payload.source.trim().length > 0
-        ? payload.source
-        : "manual",
-    type: type || "expense"
-  };
 };
 
 const escapeCsvValue = (value: unknown) => {
@@ -220,7 +169,19 @@ financeTransactionsRouter.post("/", async (req, res, next) => {
       return res.status(400).json({ error: "Invalid body: expected transaction object or items array" });
     }
 
-    const transactions = parsedItems.map((item) => validateTransactionInput(item, userId));
+    const transactions: TransactionInput[] = parsedItems.map((item) => {
+      const normalized = validateTransactionInput(item, { userId });
+      return {
+        userId,
+        date: normalized.date!,
+        amount: normalized.amount!,
+        currency: normalized.currency!,
+        category: normalized.category!,
+        description: normalized.description!,
+        source: normalized.source!,
+        type: normalized.type!
+      };
+    });
     const created = await createTransactions(transactions);
     res.status(201).json(created.length === 1 ? created[0] : { items: created });
   } catch (error: any) {
@@ -248,7 +209,19 @@ financeTransactionsRouter.post("/bulk", async (req, res, next) => {
       throw new HttpError(400, `Too many transactions. Max ${MAX_BULK_ITEMS} allowed`);
     }
 
-    const parsedTransactions = transactions.map((item: any) => validateTransactionInput(item, userId));
+    const parsedTransactions: TransactionInput[] = transactions.map((item: any) => {
+      const normalized = validateTransactionInput(item, { userId });
+      return {
+        userId,
+        date: normalized.date!,
+        amount: normalized.amount!,
+        currency: normalized.currency!,
+        category: normalized.category!,
+        description: normalized.description!,
+        source: normalized.source!,
+        type: normalized.type!
+      };
+    });
     const result = await createTransactionsBulkIdempotent({
       userId,
       batchId: batchId.trim(),

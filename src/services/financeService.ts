@@ -2,6 +2,7 @@ import { Decimal } from "@prisma/client/runtime/library";
 import { Prisma, TransactionType } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../lib/httpError";
+import { validateTransactionInput } from "../lib/validation/financeTransaction";
 
 export type TransactionFilter = {
   userId: string;
@@ -71,12 +72,6 @@ export type TransactionsBulkResult = {
   batchId: string;
   transactionIds: string[];
   items?: TransactionForExport[];
-};
-
-const parseDate = (value?: string): Date | undefined => {
-  if (!value) return undefined;
-  const date = new Date(value);
-  return isNaN(date.getTime()) ? undefined : date;
 };
 
 const isTransactionTypeValue = (value: any): value is TransactionType => {
@@ -296,53 +291,39 @@ export const deleteTransaction = async (id: string, userId: string) => {
   }
 };
 
-const validateTransactionUpdateInput = (input: TransactionUpdateInput) => {
-  const data: Prisma.FinanceTransactionUpdateInput = {};
-  if (input.date !== undefined) {
-    const date = parseDate(input.date);
-    if (!date) {
-      throw new HttpError(400, "Invalid date");
-    }
-    data.date = date;
-  }
-  if (input.amount !== undefined) {
-    if (typeof input.amount !== "number" || !Number.isFinite(input.amount) || input.amount <= 0) {
-      throw new HttpError(400, "Amount must be a positive number");
-    }
-    data.amount = new Prisma.Decimal(input.amount);
-  }
-  if (input.currency !== undefined) {
-    if (typeof input.currency !== "string" || !input.currency.trim()) {
-      throw new HttpError(400, "Currency must be a non-empty string");
-    }
-    data.currency = input.currency.trim().toUpperCase();
-  }
-  if (input.category !== undefined) {
-    if (typeof input.category !== "string" || !input.category.trim()) {
-      throw new HttpError(400, "Category must be a non-empty string");
-    }
-    data.category = input.category.trim();
-  }
-  if (input.description !== undefined) {
-    if (typeof input.description !== "string") {
-      throw new HttpError(400, "Description must be a string");
-    }
-    data.description = input.description.trim();
-  }
-  if (input.type !== undefined) {
-    if (!isTransactionTypeValue(input.type)) {
-      throw new HttpError(400, "type must be either expense or income");
-    }
-    data.type = input.type;
-  }
-  return data;
-};
-
 export const updateTransaction = async (id: string, userId: string, input: TransactionUpdateInput) => {
   if (!id) {
     throw new HttpError(400, "id is required");
   }
-  const data = validateTransactionUpdateInput(input);
+
+  const normalized = validateTransactionInput(input, { userId, partial: true });
+  const data: Prisma.FinanceTransactionUpdateInput = {};
+
+  if (normalized.date) {
+    data.date = normalized.date;
+  }
+  if (normalized.amount !== undefined) {
+    data.amount = new Prisma.Decimal(normalized.amount);
+  }
+  if (normalized.currency !== undefined) {
+    data.currency = normalized.currency;
+  }
+  if (normalized.category !== undefined) {
+    data.category = normalized.category;
+  }
+  if (normalized.description !== undefined) {
+    data.description = normalized.description;
+  }
+  if (normalized.source !== undefined) {
+    data.source = normalized.source;
+  }
+  if (normalized.type !== undefined) {
+    if (!isTransactionTypeValue(normalized.type)) {
+      throw new HttpError(400, "type must be either expense or income");
+    }
+    data.type = normalized.type;
+  }
+
   const existing = await prisma.financeTransaction.findUnique({ where: { id } });
   if (!existing || existing.userId !== userId) {
     throw new HttpError(404, "Transaction not found");
