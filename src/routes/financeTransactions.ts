@@ -6,8 +6,11 @@ import {
   updateTransaction,
   TransactionInput
 } from "../services/financeService";
+import { requireAuth } from "../lib/auth";
+import { config } from "../config/env";
 
 export const financeTransactionsRouter = Router();
+financeTransactionsRouter.use(requireAuth(config));
 
 const parseDate = (value?: string): Date | undefined => {
   if (!value) return undefined;
@@ -21,15 +24,16 @@ const parseNumber = (value: string | undefined): number | undefined => {
   return Number.isFinite(num) ? num : undefined;
 };
 
-const validateTransactionInput = (payload: any): TransactionInput => {
+const validateTransactionInput = (payload: any, userId: string): TransactionInput => {
   const errors: string[] = [];
 
   if (!payload || typeof payload !== "object") {
     throw new Error("Invalid transaction payload");
   }
 
-  const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
-  if (!userId) errors.push("userId is required");
+  if (typeof payload.userId === "string" && payload.userId.trim() && payload.userId.trim() !== userId) {
+    errors.push("userId in payload does not match the authenticated user");
+  }
 
   const dateValue = parseDate(payload.date);
   if (!dateValue) errors.push("date is required and must be a valid date");
@@ -68,7 +72,7 @@ const validateTransactionInput = (payload: any): TransactionInput => {
 
 financeTransactionsRouter.get("/", async (req, res, next) => {
   try {
-    const { from, to, category, page, limit, userId } = req.query;
+    const { from, to, category, page, limit } = req.query;
     const fromDate = typeof from === "string" ? parseDate(from) : undefined;
     const toDate = typeof to === "string" ? parseDate(to) : undefined;
 
@@ -76,7 +80,7 @@ financeTransactionsRouter.get("/", async (req, res, next) => {
     const limitNum = typeof limit === "string" ? parseNumber(limit) : undefined;
 
     const result = await listTransactions({
-      userId: typeof userId === "string" ? userId : undefined,
+      userId: req.user!.id,
       from: fromDate,
       to: toDate,
       category: typeof category === "string" ? category : undefined,
@@ -92,6 +96,7 @@ financeTransactionsRouter.get("/", async (req, res, next) => {
 
 financeTransactionsRouter.post("/", async (req, res, next) => {
   try {
+    const userId = req.user!.id;
     const body = req.body;
     const itemsPayload = Array.isArray(body?.items) ? body.items : body && !Array.isArray(body) ? [body] : body;
     const parsedItems = Array.isArray(itemsPayload) ? itemsPayload : [];
@@ -100,7 +105,7 @@ financeTransactionsRouter.post("/", async (req, res, next) => {
       return res.status(400).json({ error: "Invalid body: expected transaction object or items array" });
     }
 
-    const transactions = parsedItems.map((item) => validateTransactionInput(item));
+    const transactions = parsedItems.map((item) => validateTransactionInput(item, userId));
     const created = await createTransactions(transactions);
     res.status(201).json(created.length === 1 ? created[0] : { items: created });
   } catch (error: any) {
@@ -119,12 +124,15 @@ financeTransactionsRouter.patch("/:id", async (req, res, next) => {
     if (!id) {
       return res.status(400).json({ error: "id is required" });
     }
-    const updated = await updateTransaction(id, req.body || {});
+    const updated = await updateTransaction(id, req.user!.id, req.body || {});
     // updateTransaction() уже приводит Decimal->number, так что можно отдавать как есть
     res.json({ item: updated });
   } catch (error: any) {
     if (error instanceof Error && error.message.toLowerCase().includes("validation")) {
       return res.status(400).json({ error: error.message });
+    }
+    if (error instanceof Error && error.message.includes("not found")) {
+      return res.status(404).json({ error: "Not found" });
     }
     next(error);
   }
@@ -133,9 +141,12 @@ financeTransactionsRouter.patch("/:id", async (req, res, next) => {
 financeTransactionsRouter.delete("/:id", async (req, res, next) => {
   try {
     const { id } = req.params;
-    await deleteTransaction(id);
+    await deleteTransaction(id, req.user!.id);
     res.status(204).send();
   } catch (error) {
+    if (error instanceof Error && error.message.includes("not found")) {
+      return res.status(404).json({ error: "Not found" });
+    }
     next(error);
   }
 });

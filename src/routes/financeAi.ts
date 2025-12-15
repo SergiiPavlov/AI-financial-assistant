@@ -3,8 +3,11 @@ import { callChatModel, MissingApiKeyError } from "../lib/llmClient";
 import { transcribeAudio } from "../lib/whisperClient";
 import { createTransactions, getSummary } from "../services/financeService";
 import { CATEGORY_IDS, normalizeCategoryId, getCategoryLabel, isCategoryId } from "../lib/categories";
+import { requireAuth } from "../lib/auth";
+import { config } from "../config/env";
 
 export const financeAiRouter = Router();
+financeAiRouter.use(requireAuth(config));
 
 type ParsedTransaction = {
   date: string;
@@ -217,15 +220,12 @@ const parseTransactionsWithLLM = async (userId: string, text: string): Promise<P
 
 financeAiRouter.post("/parse-text", async (req, res, next) => {
   try {
-    const { userId, text } = req.body || {};
-    if (typeof userId !== "string" || !userId.trim()) {
-      return res.status(400).json({ error: "userId is required" });
-    }
+    const { text } = req.body || {};
     if (typeof text !== "string" || !text.trim()) {
       return res.status(400).json({ error: "text is required" });
     }
 
-    const result = await parseTransactionsWithLLM(userId, text);
+    const result = await parseTransactionsWithLLM(req.user!.id, text);
     res.json(result);
   } catch (error) {
     if (error instanceof MissingApiKeyError) {
@@ -291,18 +291,13 @@ const parseMultipartForm = async (req: any) => {
 financeAiRouter.post("/voice", async (req, res, next) => {
   try {
     const { fields, files } = await parseMultipartForm(req);
-    const userId = fields["userId"] || fields["userid"];
-    if (!userId) {
-      return res.status(400).json({ error: "userId is required" });
-    }
-
     const file = files[0];
     if (!file) {
       return res.status(400).json({ error: "Audio file is required in 'file' field" });
     }
 
     const transcription = await transcribeAudio(file.data, file.fileName, file.mimeType);
-    const parsed = await parseTransactionsWithLLM(userId, transcription.text);
+    const parsed = await parseTransactionsWithLLM(req.user!.id, transcription.text);
     res.json(parsed);
   } catch (error) {
     if (error instanceof MissingApiKeyError) {
@@ -594,17 +589,14 @@ return {
 
 financeAiRouter.post("/assistant", async (req, res, next) => {
   try {
-    const { userId, message } = req.body || {};
-    if (typeof userId !== "string" || !userId.trim()) {
-      return res.status(400).json({ error: "userId is required" });
-    }
+    const { message } = req.body || {};
     if (typeof message !== "string" || !message.trim()) {
       return res.status(400).json({ error: "message is required" });
     }
 
     const interpretation = await interpretAssistantQuestion(message);
     const summary = await getSummary({
-      userId,
+      userId: req.user!.id,
       from: new Date(interpretation.period.from),
       to: new Date(interpretation.period.to),
       groupBy: "both"
@@ -657,7 +649,6 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
         : `За период с ${summary.period.from} по ${summary.period.to} общая сумма расходов по всем категориям составила ${amount}.`;
 
     res.json({
-      userId,
       question: message,
       answer,
       details: {
@@ -679,10 +670,11 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
 
 financeAiRouter.post("/parse-and-save", async (req, res, next) => {
   try {
-    const { userId, text } = req.body || {};
-    if (!userId || !text) {
-      return res.status(400).json({ error: "userId and text are required" });
+    const { text } = req.body || {};
+    if (!text) {
+      return res.status(400).json({ error: "text is required" });
     }
+    const userId = req.user!.id;
     const parsed = await parseTransactionsWithLLM(userId, text);
     const created = await createTransactions(
       parsed.transactions.map((t) => ({

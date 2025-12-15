@@ -1,7 +1,10 @@
 import { Router } from "express";
 import { getSummary, GroupByOption } from "../services/financeService";
+import { requireAuth } from "../lib/auth";
+import { config } from "../config/env";
 
 export const financeSummaryRouter = Router();
+financeSummaryRouter.use(requireAuth(config));
 
 const parseDate = (value?: string): Date | undefined => {
   if (!value) return undefined;
@@ -11,10 +14,7 @@ const parseDate = (value?: string): Date | undefined => {
 
 financeSummaryRouter.get("/", async (req, res, next) => {
   try {
-    const { userId, from, to, groupBy } = req.query;
-    if (typeof userId !== "string" || !userId.trim()) {
-      return res.status(400).json({ error: "userId is required" });
-    }
+    const { from, to, groupBy } = req.query;
 
     const fromDate = typeof from === "string" ? parseDate(from) : undefined;
     const toDate = typeof to === "string" ? parseDate(to) : undefined;
@@ -27,7 +27,7 @@ financeSummaryRouter.get("/", async (req, res, next) => {
       groupBy === "category" || groupBy === "date" || groupBy === "both" ? (groupBy as GroupByOption) : "both";
 
     const summary = await getSummary({
-      userId,
+      userId: req.user!.id,
       from: fromDate,
       to: toDate,
       groupBy: groupByValue

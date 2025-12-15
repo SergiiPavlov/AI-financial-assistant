@@ -1,16 +1,29 @@
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import path from "path";
 import { config } from "./config/env";
 import { apiRouter } from "./routes";
+import { attachUserFromAuthHeader } from "./lib/auth";
 
 const app = express();
 
-app.use(cors());
+const corsOptions = config.corsOrigin
+  ? { origin: config.corsOrigin, credentials: true }
+  : undefined;
+
+if (corsOptions) {
+  app.use(cors(corsOptions));
+} else {
+  app.use(cors());
+}
+
+app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "../public")));
 
+app.use(attachUserFromAuthHeader(config));
 app.use("/api", apiRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
