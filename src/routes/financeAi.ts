@@ -1,10 +1,12 @@
 import { Router } from "express";
+import { createHash } from "crypto";
 import { callChatModel, MissingApiKeyError } from "../lib/llmClient";
 import { transcribeAudio } from "../lib/whisperClient";
-import { createTransactions, getSummary } from "../services/financeService";
+import { createTransactionsBulkIdempotent, getSummary } from "../services/financeService";
 import { CATEGORY_IDS, normalizeCategoryId, getCategoryLabel, isCategoryId } from "../lib/categories";
 import { requireAuth } from "../lib/auth";
 import { config } from "../config/env";
+import { HttpError } from "../lib/httpError";
 
 export const financeAiRouter = Router();
 financeAiRouter.use(requireAuth(config));
@@ -89,6 +91,12 @@ const safeJsonParse = (text: string): any => {
 const parseTransactionType = (value: unknown): ParsedTransaction["type"] | null => {
   if (value === "expense" || value === "income") return value;
   return null;
+};
+
+const buildBatchId = (userId: string, text: string, transactions: ParsedTransaction[]) => {
+  const hash = createHash("sha256");
+  hash.update(JSON.stringify({ userId, text: text || "", transactions }));
+  return hash.digest("hex");
 };
 
 const applyTypeDefaults = (
@@ -716,25 +724,48 @@ financeAiRouter.post("/assistant", async (req, res, next) => {
 
 financeAiRouter.post("/parse-and-save", async (req, res, next) => {
   try {
-    const { text } = req.body || {};
+    const { text, batchId: requestedBatchId } = req.body || {};
     if (!text) {
       return res.status(400).json({ error: "text is required" });
     }
     const userId = req.user!.id;
     const parsed = await parseTransactionsWithLLM(userId, text);
-    const created = await createTransactions(
-      parsed.transactions.map((t) => ({
+    const batchId =
+      typeof requestedBatchId === "string" && requestedBatchId.trim()
+        ? requestedBatchId.trim()
+        : buildBatchId(userId, text, parsed.transactions);
+
+    const transactions = parsed.transactions.map((t, index) => {
+      const date = new Date(t.date);
+      if (isNaN(date.getTime())) {
+        throw new HttpError(400, `Invalid date in transaction #${index + 1}`);
+      }
+
+      return {
         userId,
-        date: new Date(t.date),
+        date,
         amount: t.amount,
         currency: t.currency,
         category: t.category,
         description: t.description,
         source: t.source || "voice",
         type: t.type
-      }))
-    );
-    res.status(201).json({ ...parsed, transactions: created });
+      };
+    });
+
+    const result = await createTransactionsBulkIdempotent({
+      userId,
+      batchId,
+      transactions
+    });
+
+    res.status(result.duplicate ? 200 : 201).json({
+      ...parsed,
+      batchId: result.batchId,
+      duplicate: result.duplicate,
+      transactionIds: result.transactionIds,
+      transactions: result.items || parsed.transactions
+    });
   } catch (error) {
     if (error instanceof MissingApiKeyError) {
       return res.status(503).json({ error: error.message });
