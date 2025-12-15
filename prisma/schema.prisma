@@ -12,6 +12,12 @@ enum TransactionType {
   income
 }
 
+enum DraftStatus {
+  draft
+  applied
+  discarded
+}
+
 model User {
   id                   String               @id @default(cuid())
   email                String               @unique
@@ -20,6 +26,7 @@ model User {
   updatedAt            DateTime             @updatedAt
   financeTransactions  FinanceTransaction[]
   financeImportBatches FinanceImportBatch[]
+  financeDraftBatches  FinanceDraftBatch[]
 }
 
 model FinanceTransaction {
@@ -46,4 +53,20 @@ model FinanceImportBatch {
   transactionIds String[]
 
   @@unique([userId, batchId])
+}
+
+model FinanceDraftBatch {
+  id             String      @id @default(cuid())
+  user           User        @relation(fields: [userId], references: [id])
+  userId         String
+  source         String
+  lang           String?
+  title          String?
+  items          Json
+  status         DraftStatus @default(draft)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  appliedBatchId String?
+
+  @@index([userId, createdAt])
 }
