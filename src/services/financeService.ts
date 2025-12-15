@@ -448,21 +448,15 @@ export const getAnalytics = async (params: AnalyticsRequest) => {
     type: breakdownType
   };
 
-  const incomeTotalPromise =
-    type === "expense"
-      ? Promise.resolve({ _sum: { amount: new Prisma.Decimal(0) } })
-      : prisma.financeTransaction.aggregate({
-          where: { ...baseWhere, type: "income" },
-          _sum: { amount: true }
-        });
+  const incomeTotalPromise = prisma.financeTransaction.aggregate({
+    where: { ...baseWhere, type: "income" },
+    _sum: { amount: true }
+  });
 
-  const expenseTotalPromise =
-    type === "income"
-      ? Promise.resolve({ _sum: { amount: new Prisma.Decimal(0) } })
-      : prisma.financeTransaction.aggregate({
-          where: { ...baseWhere, type: "expense" },
-          _sum: { amount: true }
-        });
+  const expenseTotalPromise = prisma.financeTransaction.aggregate({
+    where: { ...baseWhere, type: "expense" },
+    _sum: { amount: true }
+  });
 
   const topCategoriesPromise = prisma.financeTransaction.groupBy({
     where: breakdownWhere,

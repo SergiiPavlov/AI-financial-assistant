@@ -69,7 +69,7 @@
   }
   ```
 
-  Параметры: `from`/`to` обязательны, `type` = `expense`|`income`|`all` (по умолчанию `expense`), `topN` (по умолчанию 5, макс. 20) и `limitLargest` (по умолчанию 20, макс. 50). При `type=all` итоговые суммы строятся по доходам и расходам, а разбивки (`topCategories`, `dailyTrend`, `largestTransactions`) — по расходам.
+  Параметры: `from`/`to` обязательны, `type` = `expense`|`income`|`all` (по умолчанию `expense`), `topN` (по умолчанию 5, макс. 20) и `limitLargest` (по умолчанию 20, макс. 50). Итоговые суммы (`incomeTotal`, `expenseTotal`, `balance`) всегда считаются по всем операциям периода, а `type` влияет только на разбивки: для `income` — по доходам, для `expense` и `all` — по расходам.
 
 - `/api/finance/transactions/export?from=2025-12-01&to=2025-12-31&type=income` → CSV со строками вида:
 
